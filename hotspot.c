@@ -713,6 +713,10 @@ int main(int argc, char **argv)
   }
 #endif
 
+  fprintf(stdout, "Dumping transient temperatures (for next ThermSniper iteration as .init file) %s\n", model->config->all_transient_file);
+  fprintf(stdout, "Unit\tSteady(Kelvin)\n");
+  dump_temp(model, temp, model->config->all_transient_file);
+
   /* cleanup	*/
   fclose(pin);
   if (do_transient)

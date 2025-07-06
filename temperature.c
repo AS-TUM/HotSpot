@@ -96,6 +96,8 @@ thermal_config_t default_thermal_config(void)
 	strcpy(config.grid_layer_file, NULLFILE);
 	/* output steady state grid temperatures apart from block temperatures */
 	strcpy(config.grid_steady_file, NULLFILE);
+	/* output transient temperatures in the init format */
+	strcpy(config.all_transient_file, NULLFILE);
 	/*
 	 * mapping mode between block and grid models.
 	 * default: use the temperature of the center
@@ -265,6 +267,9 @@ void thermal_config_add_from_strs(thermal_config_t *config, materials_list_t *ma
 	if ((idx = get_str_index(table, size, "grid_map_mode")) >= 0)
 		if(sscanf(table[idx].value, "%s", config->grid_map_mode) != 1)
 			fatal("invalid format for configuration  parameter grid_map_mode\n");
+	if ((idx = get_str_index(table, size, "all_transient_file")) >= 0)
+		if(sscanf(table[idx].value, "%s", config->all_transient_file) != 1)
+				fatal("invalid format for configuration parameter all_transient_file\n");
 
 	if ((config->t_chip <= 0) || (config->s_sink <= 0) || (config->t_sink <= 0) ||
 		(config->s_spreader <= 0) || (config->t_spreader <= 0) ||
@@ -396,8 +401,9 @@ int thermal_config_to_strs(thermal_config_t *config, str_pair *table, int max_en
 	sprintf(table[46].name, "grid_layer_file");
 	sprintf(table[47].name, "grid_steady_file");
 	sprintf(table[48].name, "grid_map_mode");
-  sprintf(table[49].name, "grid_transient_file");
-  sprintf(table[50].name, "detailed_3D_used");
+    sprintf(table[49].name, "grid_transient_file");
+    sprintf(table[50].name, "detailed_3D_used");
+	sprintf(table[51].name, "all_transient_file");
 
 	sprintf(table[0].value, "%lg", config->t_chip);
 	sprintf(table[1].value, "%lg", config->k_chip);
@@ -448,10 +454,11 @@ int thermal_config_to_strs(thermal_config_t *config, str_pair *table, int max_en
 	sprintf(table[46].value, "%s", config->grid_layer_file);
 	sprintf(table[47].value, "%s", config->grid_steady_file);
 	sprintf(table[48].value, "%s", config->grid_map_mode);
-  sprintf(table[49].value, "%s", config->grid_transient_file);
-  sprintf(table[50].value, "%d", config->detailed_3D_used);
+	sprintf(table[49].value, "%s", config->grid_transient_file);
+	sprintf(table[50].value, "%d", config->detailed_3D_used);
+	sprintf(table[51].value, "%s", config->all_transient_file);
 
-	return 51;
+	return 52;
 }
 
 /* package parameter routines	*/
