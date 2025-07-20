@@ -70,7 +70,7 @@
 
 void usage(int argc, char **argv)
 {
-  fprintf(stdout, "Usage: %s -f <file> -p <file> [-o <file>] [-c <file>] [-d <file>] [options]\n", argv[0]);
+  fprintf(stdout, "Usage: %s -f <file> -p <file> [-o <file>] [-c <file>] [-d <file>] [-v <volt_vector>] [-t <trace_num>] [options]\n", argv[0]);
   fprintf(stdout, "A thermal simulator that reads power trace from a file and outputs temperatures.\n");
   fprintf(stdout, "Options:(may be specified in any order, within \"[]\" means optional)\n");
   fprintf(stdout, "   -f <file>\tfloorplan input file (e.g. ev6.flp) - overridden by the\n");
@@ -106,6 +106,12 @@ void global_config_from_strs(global_config_t *config, str_pair *table, int size)
         fatal("invalid format for configuration  parameter p_infile\n");
   } else {
       fatal("required parameter p_infile missing. check usage\n");
+  }
+  if ((idx = get_str_index(table, size, "pTot")) >= 0) {
+      if(sscanf(table[idx].value, "%s", config->pTot_outfile) != 1)
+        fatal("invalid format for configuration  parameter pTot_outfile\n");
+  } else {
+      strcpy(config->pTot_outfile, NULLFILE);
   }
   if ((idx = get_str_index(table, size, "o")) >= 0) {
       if(sscanf(table[idx].value, "%s", config->t_outfile) != 1)
@@ -143,6 +149,18 @@ void global_config_from_strs(global_config_t *config, str_pair *table, int size)
   } else {
       strcpy(config->materials_file, NULLFILE);
   }
+  if ((idx = get_str_index(table, size, "v")) >= 0) {
+      if(sscanf(table[idx].value, "%s", volt_vector) != 1)
+        fatal("invalid format for volt_vector\n");
+   } else {
+       strcpy(volt_vector, "");
+   }
+  if ((idx = get_str_index(table, size, "t")) >= 0) {
+      if(sscanf(table[idx].value, "%d", &trace_num) != 1)
+        fatal("invalid format for timestamp\n");
+   } else {
+       trace_num = 0;
+   }
 }
 
 /*
@@ -162,6 +180,8 @@ int global_config_to_strs(global_config_t *config, str_pair *table, int max_entr
   sprintf(table[5].name, "detailed_3D");
   sprintf(table[6].name, "use_microchannels");
   sprintf(table[7].name, "materials_file");
+  sprintf(table[8].name, "v");                          //TODO: check if necessary
+  sprintf(table[9].name, "t");  
 
   sprintf(table[0].value, "%s", config->flp_file);
   sprintf(table[1].value, "%s", config->p_infile);
@@ -171,6 +191,8 @@ int global_config_to_strs(global_config_t *config, str_pair *table, int max_entr
   sprintf(table[5].value, "%s", config->detailed_3D);
   sprintf(table[6].value, "%d", config->use_microchannels);
   sprintf(table[7].value, "%s", config->materials_file);
+  sprintf(table[8].value, "%s", volt_vector);
+  sprintf(table[9].value, "%d", trace_num);
 
   return 8;
 }
@@ -255,8 +277,17 @@ void write_names(FILE *fp, char **names, int size)
   fprintf(fp, "%s\n", names[i]);
 }
 
-/* write a single line of temperature trace(in degree C)	*/
+/* write a single line of temperature trace	*/
 void write_vals(FILE *fp, double *vals, int size)
+{
+  int i;
+  for(i=0; i < size-1; i++)
+    fprintf(fp, "%.2f\t", vals[i]);
+  fprintf(fp, "%.2f\n", vals[i]);
+}
+
+/* write a single line of power trace (in W)	*/
+void write_vals_power(FILE *fp, double *vals, int size)
 {
   int i;
   for(i=0; i < size-1; i++)
@@ -360,14 +391,17 @@ int main(int argc, char **argv)
   int num, size, lines = 0, do_transient = TRUE;
   char **names;
   double *vals;
+  double *vals_withLeak;
   /* trace file pointers	*/
   FILE *pin, *tout = NULL;
+  FILE *pout_withLeak;            // total power output with leakage included
   /* floorplan	*/
   flp_t *flp;
   /* hotspot temperature model	*/
   RC_model_t *model;
   /* instantaneous temperature and power values	*/
   double *temp = NULL, *power;
+  double *power_withLeak;
   double total_power = 0.0;
 
   /* steady state temperature and power values	*/
@@ -400,6 +434,18 @@ int main(int argc, char **argv)
   printf("Parsing input files...\n");
   size = parse_cmdline(table, MAX_ENTRIES, argc, argv);
   global_config_from_strs(&global_config, table, size);
+
+  ////////////////////////////////////////////////////tmo//////////////////////////////
+  int length_v = strlen(volt_vector);
+  j = 0;
+  for (i = 0; i < length_v; i += 4)
+  {
+      // Convert comma-separated "x.y"s from vdd string (volt_vector) to integers: x * 10 + y
+      volt[j++] = 10 * (volt_vector[i] - '0') + (volt_vector[i+2] - '0');
+  }
+
+  printf("Simulation trace_num: %d\n", trace_num);
+  ////////////////////////////////////////////////////tmo////////////////////////////// 
 
   /* no transient simulation, only steady state	*/
   if(!strcmp(global_config.t_outfile, NULLFILE))
@@ -523,6 +569,7 @@ int main(int argc, char **argv)
   if (do_transient)
     temp = hotspot_vector(model);
   power = hotspot_vector(model);
+  power_withLeak = hotspot_vector(model);
   steady_temp = hotspot_vector(model);
   overall_power = hotspot_vector(model);
 
@@ -550,10 +597,14 @@ int main(int argc, char **argv)
   } else
     fatal("unknown model type\n");
 
+  printf("temp-leakage loop used: %d\n", model->config->leakage_used);
+
   if(!(pin = fopen(global_config.p_infile, "r")))
     fatal("unable to open power trace input file\n");
-  if(do_transient && !(tout = fopen(global_config.t_outfile, "w")))
+  if(do_transient && !(tout = fopen(global_config.t_outfile, "a")))
     fatal("unable to open temperature trace file for output\n");
+  if(do_transient && model->config->leakage_used && !(pout_withLeak = fopen(global_config.pTot_outfile, "a")))
+    fatal("unable to open trace file (total power with leakage) for output\n");
 
   /* names of functional units	*/
   names = alloc_names(MAX_UNITS, STR_SIZE);
@@ -561,11 +612,16 @@ int main(int argc, char **argv)
     fatal("no. of units in floorplan and trace file differ\n");
 
   /* header line of temperature trace	*/
-  if (do_transient)
+  if (trace_num==0 && do_transient)
+  {
+    printf("Write header of trace files\n");
     write_names(tout, names, n);
+    if(model->config->leakage_used) write_names(pout_withLeak, names, n);
+  }
 
   /* read the instantaneous power trace	*/
   vals = dvector(MAX_UNITS);
+  vals_withLeak = dvector(MAX_UNITS);
   while ((num=read_vals(pin, vals)) != 0) {
       if(num != n)
         fatal("invalid trace file format\n");
@@ -595,7 +651,7 @@ int main(int argc, char **argv)
               populate_R_model(model, flp);
           }
 
-          printf("Computing temperatures for t = %e...\n", lines*model->config->sampling_intvl);
+          printf("Computing temperatures for t = %e...\n", trace_num*model->config->sampling_intvl);
 
           /* for the grid model, only the first call to compute_temp
            * passes a non-null 'temp' array. if 'temp' is  NULL,
@@ -604,25 +660,26 @@ int main(int argc, char **argv)
            * across multiple calls of compute_temp
            */
           if (model->type == BLOCK_MODEL || lines == 0)
-            compute_temp(model, power, temp, model->config->sampling_intvl);
+            compute_temp(model, power, temp, power_withLeak, model->config->sampling_intvl);
           else
-            compute_temp(model, power, NULL, model->config->sampling_intvl);
+            compute_temp(model, power, NULL, power_withLeak, model->config->sampling_intvl);
 
 
         // Print grid transient temperatures to file if one has been specified
         if(model->type == GRID_MODEL && strcmp(model->config->grid_transient_file, NULLFILE)) {
-          dump_transient_temp_grid(model->grid, lines, model->config->sampling_intvl, model->config->grid_transient_file);
+          dump_transient_temp_grid(model->grid, model->config->sampling_intvl, model->config->grid_transient_file);
         }
           /* permute back to the trace file order	*/
           if (model->type == BLOCK_MODEL)
-            for(i=0; i < n; i++)
-              vals[i] = temp[get_blk_index(flp, names[i])];
+            fatal("HotSpot was run with block model. Incompatible with ThermSniper toolchain.");
           else
-            for(i=0, base=0, count=0; i < model->grid->n_layers; i++) {
+            for(i=0, base=0, count=0; i < model->grid->n_layers; i++) 
+            {
                 if(model->grid->layers[i].has_power) {
                     for(j=0; j < model->grid->layers[i].flp->n_units; j++) {
                         idx = get_blk_index(model->grid->layers[i].flp, names[count+j]);
                         vals[count+j] = temp[base+idx];
+                        if(model->config->leakage_used) vals_withLeak[count+j] = power_withLeak[base+idx];
                     }
                     count += model->grid->layers[i].flp->n_units;
                 }
@@ -630,6 +687,8 @@ int main(int argc, char **argv)
             }
           /* output instantaneous temperature trace	*/
           write_vals(tout, vals, n);
+          /* output power values obtained if temperature leakage loop is employed */
+          if(model->config->leakage_used) write_vals_power(pout_withLeak, vals_withLeak, n);
       }
 
       /* for computing average	*/
@@ -713,14 +772,17 @@ int main(int argc, char **argv)
   }
 #endif
 
-  fprintf(stdout, "Dumping transient temperatures (for next ThermSniper iteration as .init file) %s\n", model->config->all_transient_file);
+  fprintf(stdout, "Dumping transient temperatures (for next ThermSniper iteration as .init file) to %s\n", model->config->all_transient_file);
   fprintf(stdout, "Unit\tSteady(Kelvin)\n");
   dump_temp(model, temp, model->config->all_transient_file);
 
   /* cleanup	*/
   fclose(pin);
   if (do_transient)
+  {
     fclose(tout);
+    if(model->config->leakage_used) fclose(pout_withLeak);
+  }
   if(!model->grid->has_lcf)
     free_flp(flp, FALSE, FALSE);
   delete_RC_model(model);
@@ -733,6 +795,7 @@ int main(int argc, char **argv)
   free_dvector(overall_power);
   free_names(names);
   free_dvector(vals);
+  free_dvector(vals_withLeak);
 
   printf("Simulation complete.\n");
   return 0;

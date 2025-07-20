@@ -65,6 +65,7 @@ void sim_init()
 	/* using hotspot_vector to internally allocate any extra nodes needed	*/
 	temp = hotspot_vector(model);
 	power = hotspot_vector(model);
+	power_withLeak = hotspot_vector(model);
 	steady_temp = hotspot_vector(model);
 	overall_power = hotspot_vector(model);
 
@@ -153,9 +154,9 @@ void sim_main()
 			 * across multiple calls of compute_temp
 			 */
 			if (model->type == BLOCK_MODEL || first_call)
-				compute_temp(model, power, temp, elapsed_time);
+				compute_temp(model, power, temp, power_withLeak, elapsed_time);
 			else
-				compute_temp(model, power, NULL, elapsed_time);
+				compute_temp(model, power, NULL, power_withLeak, elapsed_time);
 
 			/* make sure to record the first call	*/
 			first_call = FALSE;

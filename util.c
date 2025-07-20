@@ -14,6 +14,11 @@
 
 #define SWAP(a,b) {temp=(a); (a)=(b); (b)=temp;}
 
+char volt_vector[385];
+unsigned int volt[128];
+
+unsigned int trace_num;
+
 int eq(double x, double y)
 {
 	return (fabs(x-y) <  DELTA);

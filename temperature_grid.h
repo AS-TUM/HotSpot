@@ -219,7 +219,7 @@ void resize_thermal_model_grid(grid_model_t *model, int n_units);
 void set_temp_grid (grid_model_t *model, double *temp, double val);
 void dump_steady_temp_grid (grid_model_t *model, char *file);
 void dump_temp_grid (grid_model_t *model, double *temp, char *file);
-void dump_transient_temp_grid(grid_model_t *model, int trace_num, double sampling_intvl, char *filename);
+void dump_transient_temp_grid(grid_model_t *model, double sampling_intvl, char *filename);
 void copy_temp_grid (grid_model_t *model, double *dst, double *src);
 void read_temp_grid (grid_model_t *model, double *temp, char *file, int clip);
 void dump_power_grid(grid_model_t *model, double *power, char *file);

@@ -186,4 +186,9 @@ void diagTocsv(char *filename, diagonal_matrix_t *diag);
 void vectorTocsv(char *filename, int size, double *vector);
 #endif
 
+// For 128 channels
+extern char volt_vector[385];
+extern unsigned int volt[128];
+
+extern unsigned int trace_num; 
 #endif

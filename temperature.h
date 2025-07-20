@@ -370,7 +370,7 @@ void populate_C_model(RC_model_t *model, flp_t *flp);
 
 /* hotspot main interfaces - temperature.c	*/
 void steady_state_temp(RC_model_t *model, double *power, double *temp);
-void compute_temp(RC_model_t *model, double *power, double *temp, double time_elapsed);
+void compute_temp(RC_model_t *model, double *power, double *temp, double *tot_power_dump, double time_elapsed);
 /* differs from 'dvector()' in that memory for internal nodes is also allocated	*/
 double *hotspot_vector(RC_model_t *model);
 /* copy 'src' to 'dst' except for a window of 'size'
@@ -430,7 +430,10 @@ void matinv(double **inv, double **m, int n, int spd);
 void scaleadd_dvector (double *dst, double *src1, double *src2, int n, double scale);
 
 /* temperature-aware leakage calculation */
-double calc_leakage(int mode, double h, double w, double temp);
+// double calc_leakage(int mode, double h, double w, double temp);
+
+/* temperature-aware leakage calculation depending on component type */
+double get_leakage(const char* component_name, int mode, double h, double w, double temp); 
 
 /* calculate average heatsink temperature for natural convection package model */
 double calc_sink_temp(RC_model_t *model, double *temp);

@@ -282,8 +282,7 @@ void thermal_config_add_from_strs(thermal_config_t *config, materials_list_t *ma
 		fatal("secondary heat tranfer layer dimensions should be greater than zero\n");
 	/* leakage iteration is not supported in transient mode in this release */
 	if (config->leakage_used == 1) {
-		printf("Warning: transient leakage iteration is not supported in this release...\n");
-		printf(" ...all transient results are without thermal-leakage loop.\n");
+		printf("Warning: transient leakage iteration is not supported by HotLeakage in this release. Manual leakage tuning...\n");
 	}
 	if ((config->model_secondary == 1) && (!strcasecmp(config->model_type, BLOCK_MODEL_STR)))
 		fatal("secondary heat tranfer path is supported only in the grid mode\n");
@@ -675,41 +674,7 @@ void steady_state_temp(RC_model_t *model, double *power, double *temp)
 	double d_max=0.0;
 
 	if (model->type == BLOCK_MODEL) {
-		n = model->block->flp->n_units;
-		if (model->config->leakage_used) { // if considering leakage-temperature loop
-			d_temp = hotspot_vector(model);
-			temp_old = hotspot_vector(model);
-			power_new = hotspot_vector(model);
-			for (leak_iter=0;(!leak_convg_true)&&(leak_iter<=LEAKAGE_MAX_ITER);leak_iter++){
-				for(i=0; i < n; i++) {
-					blk_height = model->block->flp->units[i].height;
-					blk_width = model->block->flp->units[i].width;
-					power_new[i] = power[i] + calc_leakage(model->config->leakage_mode,blk_height,blk_width,temp[i]);
-					temp_old[i] = temp[i]; //copy temp before update
-				}
-				steady_state_temp_block(model->block, power_new, temp); // update temperature
-				d_max = 0.0;
-				for(i=0; i < n; i++) {
-					d_temp[i] = temp[i] - temp_old[i]; //temperature increase due to leakage
-					if (d_temp[i]>d_max) {
-						d_max = d_temp[i];
-					}
-				}
-				if (d_max < LEAK_TOL) {// check convergence
-					leak_convg_true = 1;
-				}
-				if (d_max > TEMP_HIGH && leak_iter > 1) {// check to make sure d_max is not "nan" (esp. in natural convection)
-					fatal("temperature is too high, possible thermal runaway. Double-check power inputs and package settings.\n");
-				}
-			}
-			free(d_temp);
-			free(temp_old);
-			free(power_new);
-			/* if no convergence after max number of iterations, thermal runaway */
-			if (!leak_convg_true)
-				fatal("too many iterations before temperature-leakage convergence -- possible thermal runaway\n");
-		} else // if leakage-temperature loop is not considered
-			steady_state_temp_block(model->block, power, temp);
+		fatal("HotSpot was run with block model. Incompatible with ThermSniper toolchain.");
 	}
 	else if (model->type == GRID_MODEL)	{
 		if (model->config->leakage_used) { // if considering leakage-temperature loop
@@ -718,11 +683,13 @@ void steady_state_temp(RC_model_t *model, double *power, double *temp)
 			power_new = hotspot_vector(model);
 			for (leak_iter=0;(!leak_convg_true)&&(leak_iter<=LEAKAGE_MAX_ITER);leak_iter++){
 				for(k=0, base=0; k < model->grid->n_layers; k++) {
+					printf("steady_state_temp(): LAYER %d:\n", k);
 					if(model->grid->layers[k].has_power)
 						for(j=0; j < model->grid->layers[k].flp->n_units; j++) {
+							printf("floorplan element name: %s\n", model->grid->layers[k].flp->units[j].name);
 							blk_height = model->grid->layers[k].flp->units[j].height;
-							blk_width = model->grid->layers[k].flp->units[j].width;
-							power_new[base+j] = power[base+j] + calc_leakage(model->config->leakage_mode,blk_height,blk_width,temp[base+j]);
+							blk_width  = model->grid->layers[k].flp->units[j].width;
+							power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, temp[base+j]);
 							temp_old[base+j] = temp[base+j]; //copy temp before update
 						}
 					base += model->grid->layers[k].flp->n_units;
@@ -757,13 +724,51 @@ void steady_state_temp(RC_model_t *model, double *power, double *temp)
 	else fatal("unknown model type\n");
 }
 
+double *temp_first_time = NULL;
+
 /* transient (instantaneous) temperature	*/
-void compute_temp(RC_model_t *model, double *power, double *temp, double time_elapsed)
+void compute_temp(RC_model_t *model, double *power, double *temp, double *tot_power_dump, double time_elapsed)
 {
 	if (model->type == BLOCK_MODEL)
 		compute_temp_block(model->block, power, temp, time_elapsed);
 	else if (model->type == GRID_MODEL)
-		compute_temp_grid(model->grid, power, temp, time_elapsed);
+	{
+		if (model->config->leakage_used) // if considering leakage-temperature loop
+		{ 
+			static int count = 0;
+			int base=0;
+			int j, k;
+			double *power_new = hotspot_vector(model);
+			double blk_height, blk_width;
+
+			// Initilize the pointer first. Subsequent calls temp_first_time will hold the value of temperature for the last iteration. 
+			// [FIX]: We might not be able to free the temp_first_time.
+			if (count++ == 0)
+			{
+				temp_first_time = temp;  // temp_first_time will hold the value of temperature for the last iteration. 
+			}
+
+			for(k=0, base=0; k < model->grid->n_layers; k++) 
+			{				
+				if(model->grid->layers[k].has_power)
+					for(j=0; j < model->grid->layers[k].flp->n_units; j++) 
+					{					
+						blk_height = model->grid->layers[k].flp->units[j].height;
+						blk_width  = model->grid->layers[k].flp->units[j].width;
+						power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, temp[base+j]);
+					}
+				base += model->grid->layers[k].flp->n_units;					
+			}
+						
+			// Assigning power values to the tot_power_dump array for file output (performed in hotspot.c)
+			for (k=0; k < base; k++)
+				tot_power_dump[k] = power_new[k];
+			
+			compute_temp_grid(model->grid, power_new, temp_first_time, time_elapsed);
+			free(power_new);
+		}
+		else compute_temp_grid(model->grid, power, temp, time_elapsed);		
+	}
 	else fatal("unknown model type\n");
 }
 
@@ -912,11 +917,31 @@ void debug_print_model(RC_model_t *model)
 	else fatal("unknown model type\n");
 }
 
-/* calculate temperature-dependent leakage power */
-/* will support HotLeakage in future releases */
-double calc_leakage(int mode, double h, double w, double temp)
-{
-	/* a simple leakage model.
+// /* calculate temperature-dependent leakage power */
+// /* will support HotLeakage in future releases */
+// double calc_leakage(int mode, double h, double w, double temp)
+// {
+// 	/* a simple leakage model.
+// 	 * Be aware -- this model may not be accurate in some cases.
+// 	 * You may want to use your own temperature-dependent leakage model here.
+// 	 */
+// 	double leak_alpha = 1.5e+4;
+// 	double leak_beta = 0.036;
+// 	double leak_Tbase = 383.15; /* 110C according to the above paper */
+
+// 	double leakage_power;
+
+// 	if (mode)
+// 		fatal("HotLeakage currently is not implemented in this release of HotSpot, please check back later.\n");
+
+// 	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
+// 	return leakage_power;
+// }
+
+double calc_leakage_core(double h, double w, double temp)   
+{ 
+	/* TODO: Adapt leakage model!!!
+	 * a simple leakage model.
 	 * Be aware -- this model may not be accurate in some cases.
 	 * You may want to use your own temperature-dependent leakage model here.
 	 */
@@ -926,11 +951,79 @@ double calc_leakage(int mode, double h, double w, double temp)
 
 	double leakage_power;
 
-	if (mode)
-		fatal("HotLeakage currently is not implemented in this release of HotSpot, please check back later.\n");
+	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
+	return leakage_power;
+}
+
+double calc_leakage_L2(double h, double w, double temp)     
+{ 
+	/* TODO: Adapt leakage model!!!
+	 * a simple leakage model.
+	 * Be aware -- this model may not be accurate in some cases.
+	 * You may want to use your own temperature-dependent leakage model here.
+	 */
+	double leak_alpha = 1.5e+4;
+	double leak_beta = 0.036;
+	double leak_Tbase = 383.15; /* 110C according to the above paper */
+
+	double leakage_power;
 
 	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
 	return leakage_power;
+}
+
+double calc_leakage_L3(double h, double w, double temp)     
+{ 
+	/* TODO: Adapt leakage model!!!
+	 * a simple leakage model.
+	 * Be aware -- this model may not be accurate in some cases.
+	 * You may want to use your own temperature-dependent leakage model here.
+	 */
+	double leak_alpha = 1.5e+4;
+	double leak_beta = 0.036;
+	double leak_Tbase = 383.15; /* 110C according to the above paper */
+
+	double leakage_power;
+
+	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
+	return leakage_power;
+}
+
+double calc_leakage_TxRx(double h, double w, double temp)   
+{ 
+	/* TODO: Adapt leakage model!!!
+	 * a simple leakage model.
+	 * Be aware -- this model may not be accurate in some cases.
+	 * You may want to use your own temperature-dependent leakage model here.
+	 */
+	double leak_alpha = 1.5e+4;
+	double leak_beta = 0.036;
+	double leak_Tbase = 383.15; /* 110C according to the above paper */
+
+	double leakage_power;
+
+	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
+	return leakage_power; 
+}
+
+double get_leakage(const char* component_name, int mode, double h, double w, double temp) 
+{   
+	if (mode)
+		fatal("HotLeakage currently is not implemented in this release of HotSpot, please check back later.\n");
+
+    if (strncmp(component_name, "C", 1) == 0)
+        return calc_leakage_core(h, w, temp);
+    else if (strncmp(component_name, "L2", 2) == 0)
+        return calc_leakage_L2(h, w, temp);
+    else if (strncmp(component_name, "L3", 2) == 0)
+        return calc_leakage_L3(h, w, temp);
+    else if (strncmp(component_name, "TxRx", 4) == 0)
+        return calc_leakage_TxRx(h, w, temp);
+    else if (strncasecmp(component_name, "Filler", 6) == 0)
+        return 0.0;
+    else
+	    printf("Warning: Unknown component '%s'; no leakage assigned.", component_name);
+        return 0.0; // Unknown component
 }
 
 /* destructor */

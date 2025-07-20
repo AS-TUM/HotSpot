@@ -1294,7 +1294,7 @@ void dump_steady_temp_grid (grid_model_t *model, char *file)
     fclose(fp);
 }
 
-void dump_transient_temp_grid(grid_model_t *model, int trace_num, double sampling_intvl, char *filename) {
+void dump_transient_temp_grid(grid_model_t *model, double sampling_intvl, char *filename) {
   FILE *grid_transient_fp = fopen(filename, "a");
 
   if(!grid_transient_fp) {
