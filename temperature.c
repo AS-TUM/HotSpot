@@ -1011,8 +1011,25 @@ double get_leakage(const char* component_name, int mode, double h, double w, dou
 	if (mode)
 		fatal("HotLeakage currently is not implemented in this release of HotSpot, please check back later.\n");
 
-    if (strncmp(component_name, "C", 1) == 0)
-        return calc_leakage_core(h, w, temp);
+    if (strncmp(component_name, "C_", 2) == 0) 
+	{
+		// Find Core ID
+		const char *ptr = component_name + 2; // Skip "C_"
+		char num_buf[16];
+		int i = 0;
+		while (*ptr && *ptr != '_' && i < (int)(sizeof(num_buf) - 1)) // Second '_' possible if microarch specified...
+		{
+			if (!isdigit(*ptr)) // Invalid character in core index
+			{
+				fatal("Couldn't extract ID of core");
+			}
+			num_buf[i++] = *ptr++;
+		}
+		num_buf[i] = '\0';
+		unsigned int core_id = atoi(num_buf);
+
+        return ((float) volt[core_id]/10) * calc_leakage_core(h, w, temp);
+	}
     else if (strncmp(component_name, "L2", 2) == 0)
         return calc_leakage_L2(h, w, temp);
     else if (strncmp(component_name, "L3", 2) == 0)
