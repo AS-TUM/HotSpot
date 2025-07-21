@@ -70,9 +70,9 @@
 
 void usage(int argc, char **argv)
 {
-  fprintf(stdout, "Usage: %s -f <file> -p <file> [-o <file>] [-c <file>] [-d <file>] [-v <volt_vector>] [-t <trace_num>] [options]\n", argv[0]);
+  fprintf(stdout, "Usage: %s -f <file> -p <file> [-o <file>] [-c <file>] [-d <file>] [-v <volt_vector>] [-t <trace_num (int)>] [-TxRx_alpha <double>] [-TxRx_beta <double>] [-TxRx_Tref <double>] [-TxRx_S <double>] [-TxRx_pvmod <double>] [options]\n", argv[0]);
   fprintf(stdout, "A thermal simulator that reads power trace from a file and outputs temperatures.\n");
-  fprintf(stdout, "Options:(may be specified in any order, within \"[]\" means optional)\n");
+  fprintf(stdout, "Options:(may be specified in any order, within \"[]\" means optional)\n"); 
   fprintf(stdout, "   -f <file>\tfloorplan input file (e.g. ev6.flp) - overridden by the\n");
   fprintf(stdout, "            \tlayer configuration file (e.g. layer.lcf) when the\n");
   fprintf(stdout, "            \tlatter is specified\n");
@@ -161,6 +161,41 @@ void global_config_from_strs(global_config_t *config, str_pair *table, int size)
    } else {
        trace_num = 0;
    }
+  if ((idx = get_str_index(table, size, "TxRx_alpha")) >= 0) {
+      if(sscanf(table[idx].value, "%lf", &alpha_ONoC_MRR) != 1)
+        fatal("invalid format for TxRx_alpha\n");
+        printf("TxRx alpha: %lf\n", alpha_ONoC_MRR); //TODO: remove
+   } else { // should only occur if no TxRx in floorplan...
+       alpha_ONoC_MRR = 0; 
+   }
+  if ((idx = get_str_index(table, size, "TxRx_beta")) >= 0) {
+      if(sscanf(table[idx].value, "%lf", &beta_ONoC_MRR) != 1)
+        fatal("invalid format for TxRx_beta\n");
+        printf("TxRx beta: %lf\n", beta_ONoC_MRR); //TODO: remove
+   } else { // should only occur if no TxRx in floorplan...
+       beta_ONoC_MRR = 0; 
+   }
+  if ((idx = get_str_index(table, size, "TxRx_Tref")) >= 0) {
+      if(sscanf(table[idx].value, "%lf", &Tref_ONoC_MRR) != 1)
+        fatal("invalid format for TxRX_Tref\n");
+        printf("TxRx Tref: %lf\n", Tref_ONoC_MRR); //TODO: remove
+   } else { // should only occur if no TxRx in floorplan...
+       Tref_ONoC_MRR = 0; 
+   }
+  if ((idx = get_str_index(table, size, "TxRx_S")) >= 0) {
+      if(sscanf(table[idx].value, "%lf", &S_ONoC_MRR) != 1)
+        fatal("invalid format for TxRx_S\n");
+        printf("TxRx S: %lf\n", S_ONoC_MRR); //TODO: remove
+   } else { // should only occur if no TxRx in floorplan...
+       S_ONoC_MRR = 0; 
+   }
+  if ((idx = get_str_index(table, size, "TxRx_pvmod")) >= 0) {
+      if(sscanf(table[idx].value, "%lf", &pvmod_ONoC_MRR) != 1)
+        fatal("invalid format for TxRx_pvmod\n");
+        printf("TxRx pvmod: %lf\n", pvmod_ONoC_MRR); //TODO: remove
+   } else { // should only occur if no TxRx in floorplan...
+       pvmod_ONoC_MRR = 0; 
+   }
 }
 
 /*
@@ -180,8 +215,8 @@ int global_config_to_strs(global_config_t *config, str_pair *table, int max_entr
   sprintf(table[5].name, "detailed_3D");
   sprintf(table[6].name, "use_microchannels");
   sprintf(table[7].name, "materials_file");
-  sprintf(table[8].name, "v");                          //TODO: check if necessary
-  sprintf(table[9].name, "t");  
+  // sprintf(table[8].name, "v");                          
+  // sprintf(table[9].name, "t");  
 
   sprintf(table[0].value, "%s", config->flp_file);
   sprintf(table[1].value, "%s", config->p_infile);
@@ -191,8 +226,8 @@ int global_config_to_strs(global_config_t *config, str_pair *table, int max_entr
   sprintf(table[5].value, "%s", config->detailed_3D);
   sprintf(table[6].value, "%d", config->use_microchannels);
   sprintf(table[7].value, "%s", config->materials_file);
-  sprintf(table[8].value, "%s", volt_vector);
-  sprintf(table[9].value, "%d", trace_num);
+  // sprintf(table[8].value, "%s", volt_vector);
+  // sprintf(table[9].value, "%d", trace_num);
 
   return 8;
 }

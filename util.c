@@ -17,6 +17,8 @@
 char volt_vector[385];
 unsigned int volt[128];
 
+double alpha_ONoC_MRR, beta_ONoC_MRR, Tref_ONoC_MRR, S_ONoC_MRR, pvmod_ONoC_MRR;
+
 unsigned int trace_num;
 
 int eq(double x, double y)

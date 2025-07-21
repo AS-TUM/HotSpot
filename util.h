@@ -190,5 +190,8 @@ void vectorTocsv(char *filename, int size, double *vector);
 extern char volt_vector[385];
 extern unsigned int volt[128];
 
+// Pre-computed parameters for ONoC-TxRx tuning power
+extern double alpha_ONoC_MRR, beta_ONoC_MRR, Tref_ONoC_MRR, S_ONoC_MRR, pvmod_ONoC_MRR;
+
 extern unsigned int trace_num; 
 #endif

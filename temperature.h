@@ -432,6 +432,9 @@ void scaleadd_dvector (double *dst, double *src1, double *src2, int n, double sc
 /* temperature-aware leakage calculation */
 // double calc_leakage(int mode, double h, double w, double temp);
 
+/* temperature-aware MRR tuning power calculation*/
+double get_ONoC_tuning_pwr(double temp);
+
 /* temperature-aware leakage calculation depending on component type */
 double get_leakage(const char* component_name, int mode, double h, double w, double temp); 
 

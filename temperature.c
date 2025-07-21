@@ -733,41 +733,52 @@ void compute_temp(RC_model_t *model, double *power, double *temp, double *tot_po
 		compute_temp_block(model->block, power, temp, time_elapsed);
 	else if (model->type == GRID_MODEL)
 	{
-		if (model->config->leakage_used) // if considering leakage-temperature loop
-		{ 
-			static int count = 0;
-			int base=0;
-			int j, k;
-			double *power_new = hotspot_vector(model);
-			double blk_height, blk_width;
+		static int count = 0;
+		int base=0;
+		int j, k;
+		double *power_new = hotspot_vector(model);
+		double blk_height, blk_width;
 
-			// Initilize the pointer first. Subsequent calls temp_first_time will hold the value of temperature for the last iteration. 
-			// [FIX]: We might not be able to free the temp_first_time.
-			if (count++ == 0)
-			{
-				temp_first_time = temp;  // temp_first_time will hold the value of temperature for the last iteration. 
-			}
+		// Initilize the pointer first. Subsequent calls temp_first_time will hold the value of temperature for the last iteration. 
+		// [FIX]: We might not be able to free the temp_first_time.
+		if (count++ == 0)
+		{
+			temp_first_time = temp;  // temp_first_time will hold the value of temperature for the last iteration. 
+		}
 
-			for(k=0, base=0; k < model->grid->n_layers; k++) 
-			{				
-				if(model->grid->layers[k].has_power)
-					for(j=0; j < model->grid->layers[k].flp->n_units; j++) 
-					{					
-						blk_height = model->grid->layers[k].flp->units[j].height;
-						blk_width  = model->grid->layers[k].flp->units[j].width;
-						power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, temp[base+j]);
+		for(k=0, base=0; k < model->grid->n_layers; k++) 
+		{				
+			if(model->grid->layers[k].has_power)
+				for(j=0; j < model->grid->layers[k].flp->n_units; j++) 
+				{					
+					blk_height = model->grid->layers[k].flp->units[j].height;
+					blk_width  = model->grid->layers[k].flp->units[j].width;
+					printf("temp[base+j]: %lf\n", temp[base+j]);
+
+					// Consider tuning power of microring resonator groups in TxRx elements of ONoC
+					if (strncmp(model->grid->layers[k].flp->units[j].name, "TxRx", 4) == 0)
+					{
+						power[base+j] += get_ONoC_tuning_pwr(temp_first_time[base+j]); 
 					}
-				base += model->grid->layers[k].flp->n_units;					
-			}
-						
+					if (model->config->leakage_used) 
+					{
+						power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, temp_first_time[base+j]);
+					}
+				}
+			base += model->grid->layers[k].flp->n_units;					
+		}
+		
+		if (model->config->leakage_used) 
+		{
 			// Assigning power values to the tot_power_dump array for file output (performed in hotspot.c)
 			for (k=0; k < base; k++)
 				tot_power_dump[k] = power_new[k];
-			
+		
 			compute_temp_grid(model->grid, power_new, temp_first_time, time_elapsed);
-			free(power_new);
 		}
-		else compute_temp_grid(model->grid, power, temp, time_elapsed);		
+		else compute_temp_grid(model->grid, power, temp, time_elapsed);	
+
+		free(power_new);
 	}
 	else fatal("unknown model type\n");
 }
@@ -1004,6 +1015,21 @@ double calc_leakage_TxRx(double h, double w, double temp)
 
 	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
 	return leakage_power; 
+}
+
+double get_ONoC_tuning_pwr(double temp)
+{
+	//TODO: Verify
+	
+	double therm_mod_ONoC_MRR = fmod(alpha_ONoC_MRR * (temp-Tref_ONoC_MRR), S_ONoC_MRR);
+
+	if (therm_mod_ONoC_MRR < 0) therm_mod_ONoC_MRR += S_ONoC_MRR;  // ensure positive modulo (in case delta T negative)
+
+	double offset = fmod(pvmod_ONoC_MRR + therm_mod_ONoC_MRR, S_ONoC_MRR);
+
+	double delta_lambda_heat = fmod(S_ONoC_MRR - offset, S_ONoC_MRR);
+
+	return beta_ONoC_MRR * delta_lambda_heat;  
 }
 
 double get_leakage(const char* component_name, int mode, double h, double w, double temp) 
