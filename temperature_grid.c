@@ -453,6 +453,23 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
           }
       }
   }
+
+  /* Assign default b2gmap values for unassigned grid cells */
+  res = 1.0 / layer->k;   // default layer resistivity
+  sh = layer->sp;         // default layer specific heat
+
+  for (i = 0; i < model->rows; i++) {
+      for (j = 0; j < model->cols; j++) {
+          if (!layer->b2gmap[i][j]) {
+              // Assign dummy unit index (-1), 0 occupancy
+              layer->b2gmap[i][j] = new_blist(-1, 0.0, res, sh, 0,
+                  model->config.detailed_3D_used, cw, ch, layer->thickness);
+
+              layer->b2gmap[i][j]->hasRes = FALSE;
+              layer->b2gmap[i][j]->hasCap = FALSE;
+          }
+      }
+  }
 }
 
 /* populate default set of layers	*/
