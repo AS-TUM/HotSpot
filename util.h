@@ -29,6 +29,11 @@
 #define LINE_SIZE		65536
 #define MAX_ENTRIES		512
 
+#define MAGIC_MMAP_FILE 0x48504D44 
+#define TRANS_TEMP_FILE "last_trans_temp_mmap.bin"
+
+#define FILLER_BLIST_IDX -1
+
 int eq(double x, double y);
 int le(double x, double y);
 int ge(double x, double y);

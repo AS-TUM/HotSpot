@@ -214,8 +214,8 @@ typedef struct thermal_config_t_st
 	char grid_steady_file[STR_SIZE];
 	/* mapping mode between grid and block models	*/
 	char grid_map_mode[STR_SIZE];
-	/* output transient temperatures in the format of init file, to be used for next iteration initialization */
-	char all_transient_file[STR_SIZE];	
+	// /* output transient temperatures in the format of init file, to be used for next iteration initialization */
+	// char all_transient_file[STR_SIZE];	
 	/* transient grid temperatures to file */
 	char grid_transient_file[STR_SIZE];
 
@@ -370,7 +370,7 @@ void populate_C_model(RC_model_t *model, flp_t *flp);
 
 /* hotspot main interfaces - temperature.c	*/
 void steady_state_temp(RC_model_t *model, double *power, double *temp);
-void compute_temp(RC_model_t *model, double *power, double *temp, double *tot_power_dump, double time_elapsed);
+void compute_temp(RC_model_t *model, double *power, int first_invocation, double *tot_power_dump, double time_elapsed);
 /* differs from 'dvector()' in that memory for internal nodes is also allocated	*/
 double *hotspot_vector(RC_model_t *model);
 /* copy 'src' to 'dst' except for a window of 'size'

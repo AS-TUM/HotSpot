@@ -120,7 +120,7 @@ typedef struct thermal_config_t_st
 	/* mapping mode between grid and block models	*/
 	char grid_map_mode[STR_SIZE];
 	
-	char all_transient_file[STR_SIZE];
+	// char all_transient_file[STR_SIZE];
 
 	int detailed_3D_used; //BU_3D: Added parameter to check for heterogenous R-C model
 }thermal_config_t;
@@ -301,6 +301,6 @@ void steady_state_temp(RC_model_t *model, double *power, double *temp);
  * of the transient simulation. 'temp' will contain the
  * output temperature numbers after the call.
  */
-void compute_temp(RC_model_t *model, double *power, double *temp, double time_elapsed);
+void compute_temp(RC_model_t *model, double *power, int num_invocation, double time_elapsed);
 
 #endif

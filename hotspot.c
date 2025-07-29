@@ -87,6 +87,65 @@ void usage(int argc, char **argv)
   fprintf(stdout, "  [-detailed_3D <on/off]>\tHeterogeneous R-C assignments for specified layers. Requires a .lcf file to be specified\n"); //BU_3D: added detailed_3D option
 }
 
+
+#include <sys/mman.h>
+#include <fcntl.h> 
+// #include <assert.h>
+void load_last_trans_temp_mmap(grid_model_t *model, const char *filename,
+                                     void **mapped_region, size_t *mapped_size) {
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) { perror("open"); exit(1); }
+
+    off_t fsize = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    *mapped_size = (size_t)fsize;
+
+    void *raw = mmap(NULL, fsize, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (raw == MAP_FAILED) fatal("mmap failed\n");
+    *mapped_region = raw;
+
+    int *header = (int *)raw;
+    if (header[0] != MAGIC_MMAP_FILE || header[1] != (trace_num-1)) 
+    {
+        munmap(raw, fsize);
+        fatal("Invalid file header\n");
+    }
+
+    int layers = header[2], rows = header[3], cols = header[4], num_extra = header[5];
+    if (layers != model->n_layers || rows != model->rows || cols != model->cols) 
+    {
+        fprintf(stderr, "Grid mismatch: file [%d,%d,%d], model [%d,%d,%d]\n",
+                layers, rows, cols, model->n_layers, model->rows, model->cols);
+        munmap(raw, fsize);
+        exit(1);
+    }
+
+    double *cuboid_flat = (double *)(header + 6);
+    double *extra_flat = cuboid_flat + ((size_t)layers * rows * cols);
+    double *last_temp_flat = extra_flat + num_extra;
+
+    // Setup last_trans
+    grid_model_vector_t *v = calloc(1, sizeof(grid_model_vector_t));
+    v->cuboid = calloc(layers, sizeof(double **));
+    for (int l = 0; l < layers; l++) {
+        v->cuboid[l] = calloc(rows, sizeof(double *));
+        for (int r = 0; r < rows; r++) {
+            size_t offset = ((size_t)l * rows + r) * cols;
+            v->cuboid[l][r] = &cuboid_flat[offset];
+        }
+    }
+    v->extra = extra_flat;
+    model->last_trans = v;
+
+    // Setup last_temp
+    model->last_temp = last_temp_flat;    
+}
+
+void unload_last_trans_temp(void *mapped_region, size_t mapped_size) {
+    munmap(mapped_region, mapped_size);
+}
+
 /*
  * parse a table of name-value string pairs and add the configuration
  * parameters to 'config'
@@ -158,6 +217,7 @@ void global_config_from_strs(global_config_t *config, str_pair *table, int size)
   if ((idx = get_str_index(table, size, "t")) >= 0) {
       if(sscanf(table[idx].value, "%d", &trace_num) != 1)
         fatal("invalid format for timestamp\n");
+        printf("Timestamp: %d\n", trace_num); //TODO: remove
    } else {
        trace_num = 0;
    }
@@ -422,7 +482,9 @@ void print_simulation_summary(thermal_config_t thermal_config, RC_model_t *model
  */
 int main(int argc, char **argv)
 {
-  int i, j, idx, base = 0, count = 0, n = 0;
+  int i, j, idx, base = 0, count = 0, n = 0, first_invocation;
+  void *mapped_region;
+  size_t mapped_size;
   int num, size, lines = 0, do_transient = TRUE;
   char **names;
   double *vals;
@@ -435,7 +497,7 @@ int main(int argc, char **argv)
   /* hotspot temperature model	*/
   RC_model_t *model;
   /* instantaneous temperature and power values	*/
-  double *temp = NULL, *power;
+  double *power;
   double *power_withLeak;
   double total_power = 0.0;
 
@@ -602,20 +664,23 @@ int main(int argc, char **argv)
   /* allocate the temp and power arrays	*/
   /* using hotspot_vector to internally allocate any extra nodes needed	*/
   if (do_transient)
-    temp = hotspot_vector(model);
+    model->grid->last_temp = hotspot_vector(model);
   power = hotspot_vector(model);
   power_withLeak = hotspot_vector(model);
   steady_temp = hotspot_vector(model);
   overall_power = hotspot_vector(model);
 
-  /* set up initial instantaneous temperatures */
-  if (do_transient && strcmp(model->config->init_file, NULLFILE)) {
-      if (!model->config->dtm_used)	/* initial T = steady T for no DTM	*/
-        read_temp(model, temp, model->config->init_file, FALSE);
-      else	/* initial T = clipped steady T with DTM	*/
-        read_temp(model, temp, model->config->init_file, TRUE);
-  } else if (do_transient)	/* no input file - use init_temp as the common temperature	*/
-    set_temp(model, temp, model->config->init_temp);
+  /* set up initial instantaneous temperatures if first ThermSniper HotSpot invocation*/
+  if (trace_num==0 ) 
+  {
+    if (do_transient && strcmp(model->config->init_file, NULLFILE)) {
+        if (!model->config->dtm_used)	/* initial T = steady T for no DTM	*/
+          read_temp(model, model->grid->last_temp, model->config->init_file, FALSE);
+        else	/* initial T = clipped steady T with DTM	*/
+          read_temp(model, model->grid->last_temp, model->config->init_file, TRUE);
+    } else if (do_transient)	/* no input file - use init_temp as the common temperature	*/
+      set_temp(model, model->grid->last_temp, model->config->init_temp);
+  }
 
 
   /* n is the number of functional blocks in the block model
@@ -646,12 +711,23 @@ int main(int argc, char **argv)
   if(read_names(pin, names) != n)
     fatal("no. of units in floorplan and trace file differ\n");
 
-  /* header line of temperature trace	*/
+  /* header lines of trace files and cleanup of old TRANS_TEMP_FILE */
   if (trace_num==0 && do_transient)
   {
-    printf("Write header of trace files\n");
+    printf("Writing header of trace files\n");
     write_names(tout, names, n);
     if(model->config->leakage_used) write_names(pout_withLeak, names, n);
+
+    if (access(TRANS_TEMP_FILE, F_OK) == 0) {
+        printf("Deleting detected obsolete file: %s\n", TRANS_TEMP_FILE);
+        if (unlink(TRANS_TEMP_FILE) != 0) {
+          fatal("Could not delete old transient temp data file\n");
+        }
+    }
+  }
+  else if(trace_num!=0 && do_transient)
+  {
+    load_last_trans_temp_mmap(model->grid, TRANS_TEMP_FILE, &mapped_region, &mapped_size);
   }
 
   /* read the instantaneous power trace	*/
@@ -681,39 +757,30 @@ int main(int argc, char **argv)
       if (do_transient) {
           /* if natural convection is considered, update transient convection resistance first */
           if (natural) {
-              avg_sink_temp = calc_sink_temp(model, temp);
+              avg_sink_temp = calc_sink_temp(model, model->grid->last_temp);
               natural = package_model(model->config, table, size, avg_sink_temp);
               populate_R_model(model, flp);
           }
 
+          first_invocation = (trace_num==0) && (lines==0);
           printf("Computing temperatures for t = %e...\n", trace_num*model->config->sampling_intvl);
+          compute_temp(model, power, first_invocation, power_withLeak, model->config->sampling_intvl);
 
-          /* for the grid model, only the first call to compute_temp
-           * passes a non-null 'temp' array. if 'temp' is  NULL,
-           * compute_temp remembers it from the last non-null call.
-           * this is used to maintain the internal grid temperatures
-           * across multiple calls of compute_temp
-           */
-          if (model->type == BLOCK_MODEL || lines == 0)
-            compute_temp(model, power, temp, power_withLeak, model->config->sampling_intvl);
-          else
-            compute_temp(model, power, NULL, power_withLeak, model->config->sampling_intvl);
-
-
+        
         // Print grid transient temperatures to file if one has been specified
         if(model->type == GRID_MODEL && strcmp(model->config->grid_transient_file, NULLFILE)) {
           dump_transient_temp_grid(model->grid, model->config->sampling_intvl, model->config->grid_transient_file);
         }
           /* permute back to the trace file order	*/
           if (model->type == BLOCK_MODEL)
-            fatal("HotSpot was run with block model. Incompatible with ThermSniper toolchain.");
+            fatal("HotSpot was run with block model. Incompatible with ThermSniper toolchain.\n");
           else
             for(i=0, base=0, count=0; i < model->grid->n_layers; i++) 
             {
                 if(model->grid->layers[i].has_power) {
                     for(j=0; j < model->grid->layers[i].flp->n_units; j++) {
                         idx = get_blk_index(model->grid->layers[i].flp, names[count+j]);
-                        vals[count+j] = temp[base+idx];
+                        vals[count+j] = model->grid->last_temp[base+idx];
                         if(model->config->leakage_used) vals_withLeak[count+j] = power_withLeak[base+idx];
                     }
                     count += model->grid->layers[i].flp->n_units;
@@ -758,35 +825,35 @@ int main(int argc, char **argv)
           }
         base += model->grid->layers[i].flp->n_units;
     }
-  /* natural convection r_convec iteration, for steady-state only */
-  natural_convergence = 0;
-  if (natural) { /* natural convection is used */
-      while (!natural_convergence) {
-          r_convec_old = model->config->r_convec;
-          /* steady state temperature	*/
-          steady_state_temp(model, overall_power, steady_temp);
-          avg_sink_temp = calc_sink_temp(model, steady_temp) + SMALL_FOR_CONVEC;
-          natural = package_model(model->config, table, size, avg_sink_temp);
-          populate_R_model(model, flp);
-          if (avg_sink_temp > MAX_SINK_TEMP)
-            fatal("too high power for a natural convection package -- possible thermal runaway\n");
-          if (fabs(model->config->r_convec-r_convec_old)<NATURAL_CONVEC_TOL)
-            natural_convergence = 1;
-      }
-  }	else {/* natural convection is not used, no need for iterations */
-      fprintf(stderr, "Computing steady-state temperatures...\n");
-      steady_state_temp(model, overall_power, steady_temp);
-    }
+  // /* natural convection r_convec iteration, for steady-state only */ 
+  // natural_convergence = 0;  
+  // if (natural) { /* natural convection is used */  
+  //     while (!natural_convergence) {  
+  //         r_convec_old = model->config->r_convec;  
+  //         /* steady state temperature	*/  
+  //         steady_state_temp(model, overall_power, steady_temp);  
+  //         avg_sink_temp = calc_sink_temp(model, steady_temp) + SMALL_FOR_CONVEC;  
+  //         natural = package_model(model->config, table, size, avg_sink_temp);  
+  //         populate_R_model(model, flp);  
+  //         if (avg_sink_temp > MAX_SINK_TEMP)  
+  //           fatal("too high power for a natural convection package -- possible thermal runaway\n");  
+  //         if (fabs(model->config->r_convec-r_convec_old)<NATURAL_CONVEC_TOL)
+  //           natural_convergence = 1;
+  //     }
+  // }	else {/* natural convection is not used, no need for iterations */
+  //     fprintf(stderr, "Computing steady-state temperatures...\n");
+  //     steady_state_temp(model, overall_power, steady_temp);
+  //   }
 
-  /* dump steady state temperatures on to file if needed	*/
-  if (strcmp(model->config->steady_file, NULLFILE))
-    dump_temp(model, steady_temp, model->config->steady_file);
-  /* for the grid model, optionally dump the most recent
-   * steady state temperatures of the grid cells
-   */
-  if (model->type == GRID_MODEL &&
-      strcmp(model->config->grid_steady_file, NULLFILE))
-    dump_steady_temp_grid(model->grid, model->config->grid_steady_file);
+  // /* dump steady state temperatures on to file if needed	*/
+  // if (strcmp(model->config->steady_file, NULLFILE))
+  //   dump_temp(model, steady_temp, model->config->steady_file);
+  // /* for the grid model, optionally dump the most recent
+  //  * steady state temperatures of the grid cells
+  //  */
+  // if (model->type == GRID_MODEL &&
+  //     strcmp(model->config->grid_steady_file, NULLFILE))
+  //   dump_steady_temp_grid(model->grid, model->config->grid_steady_file);
 
 
 #if VERBOSE > 2
@@ -807,11 +874,12 @@ int main(int argc, char **argv)
   }
 #endif
 
-  fprintf(stdout, "Dumping transient temperatures (for next ThermSniper iteration as .init file) to %s\n", model->config->all_transient_file);
-  fprintf(stdout, "Unit\tSteady(Kelvin)\n");
-  dump_temp(model, temp, model->config->all_transient_file);
+  // fprintf(stdout, "Dumping transient temperatures (for next ThermSniper iteration as .init file) to %s\n", model->config->all_transient_file);
+  // fprintf(stdout, "Unit\tSteady(Kelvin)\n");
+  // dump_temp(model, temp, model->config->all_transient_file);
 
   /* cleanup	*/
+  unload_last_trans_temp(mapped_region, mapped_size); //TODO: check
   fclose(pin);
   if (do_transient)
   {
@@ -820,9 +888,9 @@ int main(int argc, char **argv)
   }
   if(!model->grid->has_lcf)
     free_flp(flp, FALSE, FALSE);
-  delete_RC_model(model);
   if (do_transient)
-    free_dvector(temp);
+    free_dvector(model->grid->last_temp);
+  delete_RC_model(model);
   free_materials(&materials_list);
   free_microchannel(microchannel_config);
   free_dvector(power);

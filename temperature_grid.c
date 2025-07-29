@@ -320,16 +320,38 @@ void blist_append(blist_t *head, int idx, double occupancy,double res, double sp
 }
 
 /* compute the power/temperature average weighted by occupancies	*/
-double blist_avg(blist_t *ptr, flp_t *flp, double *v, int type)
+double blist_avg(blist_t *ptr, flp_t *flp, double *v, int type, double ambient)
 {
   double  val = 0.0;
 
   for(; ptr; ptr = ptr->next) {
       if (type == V_POWER)
-        val += ptr->occupancy * v[ptr->idx] / (flp->units[ptr->idx].width *
+      {
+        if(ptr->idx == FILLER_BLIST_IDX) 
+        {
+          val += 0; // Fillers contribute zero power
+        }
+        else
+        {
+          val += ptr->occupancy * v[ptr->idx] / (flp->units[ptr->idx].width *
                                                flp->units[ptr->idx].height);
+        }
+      }
       else if (type == V_TEMP)
-        val += ptr->occupancy * v[ptr->idx];
+      { 
+        /* V_TEMP is only set in the first iteration, since in the following
+           iterations the last_trans grid model vector can be used...     
+           In the first iteration, filler temperatures are initialized to 
+           the ambient temperature spec                                    */
+        if(ptr->idx == FILLER_BLIST_IDX) 
+        {
+          val += ptr->occupancy * ambient;
+        }
+        else
+        {
+           val += ptr->occupancy * v[ptr->idx];
+        }
+      }
       else
         fatal("unknown vector type\n");
   }
@@ -343,6 +365,8 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
   /* i1, i2, j1 and j2 are indices of the boundary grid cells	*/
   int i, j, u, i1, i2, j1, j2;
 
+  int filler_component = FALSE;
+
   /* shortcuts for cell width(cw) and cell height(ch)	*/
   double cw = model->width / model->cols;
   double ch = model->height / model->rows;
@@ -353,6 +377,20 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
 
   /* for each functional unit	*/
   for(u=0; u < layer->flp->n_units; u++) {
+
+      /* shortcut for specified "Filler" components */
+      if (strncmp(layer->flp->units[u].name, "Filler", 6) == 0 || 
+          strncmp(layer->flp->units[u].name, "filler", 6) == 0) 
+      {
+        filler_component = TRUE;
+        printf("set_bgmap: filler detected: ");
+      }
+
+      if(filler_component)//TODO: delete
+      {//TODO: delete
+        printf("Confirmed\n");//TODO: delete
+      } //TODO: delete
+
       /* shortcuts for unit boundaries	*/
       double lu = layer->flp->units[u].leftx;
       double ru = lu + layer->flp->units[u].width;
@@ -402,7 +440,14 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
               if ((i > i1) && (i < i2-1) && (j > j1) && (j < j2-1)) {
                   /* first unit in the list	*/
                   if (!layer->b2gmap[i][j]){
-                      layer->b2gmap[i][j] = new_blist(u, 1.0,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      if(filler_component) 
+                      {
+                        layer->b2gmap[i][j] = new_blist(FILLER_BLIST_IDX, 1.0,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      }
+                      else
+                      {
+                        layer->b2gmap[i][j] = new_blist(u, 1.0,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      }
                       layer->b2gmap[i][j]->hasRes = TRUE;//BU_3D assign hasRes to the b2gdata structure
                       layer->b2gmap[i][j]->hasCap = layer->flp->units[u].hasSh;//BU_3D assign hasSh to the b2gdata structure
                   }
@@ -410,7 +455,14 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
                       /* this should not occur since the grid cell is
                        * fully covered and hence, no other unit should
                        * be sharing it */
-                      blist_append(layer->b2gmap[i][j], u, 1.0,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      if(filler_component) 
+                      {
+                        blist_append(layer->b2gmap[i][j], FILLER_BLIST_IDX, 1.0,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      }
+                      else
+                      {
+                        blist_append(layer->b2gmap[i][j], u, 1.0,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      }
                       warning("overlap of functional blocks?\n");
                   }
                   /* boundary grid cells partially overlapped by this unit	*/
@@ -442,16 +494,32 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
 
                   /* first unit in the list	*/
                   if (!layer->b2gmap[i][j]){
-                      layer->b2gmap[i][j] = new_blist(u, occupancy,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      if(filler_component) 
+                      {
+                         layer->b2gmap[i][j] = new_blist(FILLER_BLIST_IDX, occupancy,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      }
+                      else
+                      {
+                        layer->b2gmap[i][j] = new_blist(u, occupancy,res,sh,1,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                      }
                       layer->b2gmap[i][j]->hasRes = TRUE;//BU_3D assign hasRes to the b2gdata structure
                       layer->b2gmap[i][j]->hasCap = layer->flp->units[u].hasSh;//BU_3D assign hasSh to the b2gdata structure
                   }
                   else
                     /* append at the end */
-                    blist_append(layer->b2gmap[i][j], u, occupancy,res,sh,0,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                    if(filler_component) 
+                    {
+                      blist_append(layer->b2gmap[i][j], FILLER_BLIST_IDX, occupancy,res,sh,0,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                    }
+                    else
+                    {
+                      blist_append(layer->b2gmap[i][j], u, occupancy,res,sh,0,model->config.detailed_3D_used,cw,ch,layer->thickness);
+                    }
               }
           }
       }
+
+    filler_component = FALSE;
   }
 
   /* Assign default b2gmap values for unassigned grid cells */
@@ -461,8 +529,8 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
   for (i = 0; i < model->rows; i++) {
       for (j = 0; j < model->cols; j++) {
           if (!layer->b2gmap[i][j]) {
-              // Assign dummy unit index (-1), 0 occupancy
-              layer->b2gmap[i][j] = new_blist(-1, 0.0, res, sh, 0,
+              // Assign dummy unit index, 1 occupancy
+              layer->b2gmap[i][j] = new_blist(FILLER_BLIST_IDX, 1.0, res, sh, 0,
                   model->config.detailed_3D_used, cw, ch, layer->thickness);
 
               layer->b2gmap[i][j]->hasRes = FALSE;
@@ -1924,13 +1992,26 @@ void xlate_vector_b2g(grid_model_t *model, double *b, grid_model_vector_t *g, in
              * blocks in it weighted by their occupancies
              */
             /* convert power density to power	*/
+            // int detected_block, k;
+            // for(k=0; k < model->layers[n].flp->n_units; k++)
+            // {
+            //   if(i >= model->layers[n].g2bmap[k].i1 && i <= model->layers[n].g2bmap[k].i2 &&
+            //      j >= model->layers[n].g2bmap[k].j1 && j <= model->layers[n].g2bmap[k].j2)
+            //     {
+            //       printf("calling blist_avg() for block: %s\n", model->layers[n].flp->units[k].name);
+            //       break;
+            //     }
+            // }
+            // if(k==model->layers[n].flp->n_units) printf("calling blist_avg() for filler (unassigned cell)\n");
             if (type == V_POWER)
               g->cuboid[n][i][j] = blist_avg(model->layers[n].b2gmap[i][j],
-                                             model->layers[n].flp, &b[base], type) * area;
+                                             model->layers[n].flp, &b[base], 
+                                             type, model->config.ambient) * area;
             /* no conversion necessary for temperature	*/
             else if (type == V_TEMP)
               g->cuboid[n][i][j] = blist_avg(model->layers[n].b2gmap[i][j],
-                                             model->layers[n].flp, &b[base], type);
+                                             model->layers[n].flp, &b[base], 
+                                             type, model->config.ambient);
             else
               fatal("unknown vector type\n");
         }
@@ -2813,59 +2894,59 @@ void recursive_multigrid(grid_model_t *model, grid_model_vector_t *power,
 #endif
 }
 
-void steady_state_temp_grid(grid_model_t *model, double *power, double *temp)
-{
-  grid_model_vector_t *p;
-  double delta;
+// void steady_state_temp_grid(grid_model_t *model, double *power, double *temp)
+// {
+//   grid_model_vector_t *p;
+//   double delta;
 
-#if VERBOSE > 1
-  int num_iterations = 0;
-#endif
+// #if VERBOSE > 1
+//   int num_iterations = 0;
+// #endif
 
-  if (!model->r_ready)
-    fatal("R model not ready\n");
+//   if (!model->r_ready)
+//     fatal("R model not ready\n");
 
-  p = new_grid_model_vector(model);
+//   p = new_grid_model_vector(model);
 
-  /* package nodes' power numbers	*/
-  set_internal_power_grid(model, power);
+//   /* package nodes' power numbers	*/
+//   set_internal_power_grid(model, power);
 
-  /* map the block power numbers to the grid	*/
-  xlate_vector_b2g(model, power, p, V_POWER);
+//   /* map the block power numbers to the grid	*/
+//   xlate_vector_b2g(model, power, p, V_POWER);
 
-#if SUPERLU > 0
-  /* solve with SuperLU. use grid model's internal
-   * state vector to store the grid temperatures
-   */
-  direct_SLU(model, p, model->last_steady);
-#else
-  /* solve recursively. use grid model's internal
-   * state vector to store the grid temperatures
-   */
-  if(model->config.detailed_3D_used){
-      // For detailed 3D, we do not use multi_grid
-      set_heuristic_temp(model, p, model->last_steady);
-      do {
-          delta = single_iteration_steady_grid(model, p, model->last_steady);
-#if VERBOSE > 1
-          num_iterations++;
-#endif
-      } while (!eq(delta, 0));
-#if VERBOSE > 1
-      fprintf(stdout, "no. of iterations for steady state convergence (%d x %d grid): %d\n",
-              model->rows, model->cols, num_iterations);
-#endif
-  }
-  else{
-      recursive_multigrid(model, p, model->last_steady);
-  }
-#endif
+// #if SUPERLU > 0
+//   /* solve with SuperLU. use grid model's internal
+//    * state vector to store the grid temperatures
+//    */
+//   direct_SLU(model, p, model->last_steady);
+// #else
+//   /* solve recursively. use grid model's internal
+//    * state vector to store the grid temperatures
+//    */
+//   if(model->config.detailed_3D_used){
+//       // For detailed 3D, we do not use multi_grid
+//       set_heuristic_temp(model, p, model->last_steady);
+//       do {
+//           delta = single_iteration_steady_grid(model, p, model->last_steady);
+// #if VERBOSE > 1
+//           num_iterations++;
+// #endif
+//       } while (!eq(delta, 0));
+// #if VERBOSE > 1
+//       fprintf(stdout, "no. of iterations for steady state convergence (%d x %d grid): %d\n",
+//               model->rows, model->cols, num_iterations);
+// #endif
+//   }
+//   else{
+//       recursive_multigrid(model, p, model->last_steady);
+//   }
+// #endif
 
-  /* map the temperature numbers back	*/
-  xlate_temp_g2b(model, temp, model->last_steady);
+//   /* map the temperature numbers back	*/
+//   xlate_temp_g2b(model, temp, model->last_steady);
 
-  free_grid_model_vector(p);
-}
+//   free_grid_model_vector(p);
+// }
 
 /* function to access a 1-d array as a 3-d matrix	*/
 #define A3D(array,n,i,j,nl,nr,nc)		(array[(n)*(nr)*(nc) + (i)*(nc) + (j)])
@@ -3617,7 +3698,44 @@ void slope_fn_grid(grid_model_t *model, double *v, grid_model_vector_t *p, doubl
   slope_fn_pack(model, v, p, dv);
 }
 
-void compute_temp_grid(grid_model_t *model, double *power, double *temp, double time_elapsed)
+
+void save_last_trans_mmap(grid_model_t *m, const char *filename, int num_extra) 
+{
+    printf("save_last_trans_mmap()\n");
+    FILE *f = fopen(filename, "wb");
+    if (!f) { perror("fopen"); exit(1); }
+
+    int header[6] = {
+        MAGIC_MMAP_FILE,
+        trace_num,      
+        m->n_layers,
+        m->rows,
+        m->cols,
+        num_extra
+    };
+    fwrite(header, sizeof(header), 1, f);
+
+    // Write cuboid
+    for (int l = 0; l < m->n_layers; l++)
+        for (int r = 0; r < m->rows; r++)
+            fwrite(m->last_trans->cuboid[l][r], sizeof(double), m->cols, f);
+    
+    // Write extra
+    fwrite(m->last_trans->extra, sizeof(double), num_extra, f);
+
+    printf("write last temp\n");
+    // Write last_temp
+    size_t total_nodes;
+    if (m->config.model_secondary)
+      total_nodes = m->total_n_blocks + EXTRA + EXTRA_SEC;
+    else
+      total_nodes = m->total_n_blocks + EXTRA;
+    fwrite(m->last_temp, sizeof(double), total_nodes, f);
+
+    fclose(f);
+}
+
+void compute_temp_grid(grid_model_t *model, double *power, int first_invocation, double time_elapsed)
 {
   double t, h, new_h;
   int extra_nodes;
@@ -3643,9 +3761,9 @@ void compute_temp_grid(grid_model_t *model, double *power, double *temp, double 
    * last call. otherwise, translate afresh and remember
    * the grid and block temperature arrays for future use
    */
-  if (temp != NULL) {
-      xlate_vector_b2g(model, temp, model->last_trans, V_TEMP);
-      model->last_temp = temp;
+  if (first_invocation) {
+      printf("Call xlate_vector_b2g with V_TEMP\n");
+      xlate_vector_b2g(model, model->last_temp, model->last_trans, V_TEMP);
   }
 
 #if SUPERLU > 0
@@ -3717,6 +3835,9 @@ void compute_temp_grid(grid_model_t *model, double *power, double *temp, double 
   /* map the temperature numbers back	*/
   xlate_temp_g2b(model, model->last_temp, model->last_trans);
 
+  /* save transient temperature data for next ThermSniper HotSpot invocation */
+  save_last_trans_mmap(model, TRANS_TEMP_FILE, extra_nodes);
+
   free_grid_model_vector(p);
 }
 
@@ -3727,7 +3848,7 @@ void debug_print_blist(blist_t *head, flp_t *flp)
   fprintf(stdout, "printing blist information...\n");
   for(ptr = head; ptr; ptr = ptr->next) {
       fprintf(stdout, "unit: %s\n", flp->units[ptr->idx].name);
-      fprintf(stdout, "occupancy: %f\n", ptr->occupancy);
+      fprintf(stdout, "idx: %d, occupancy: %f\n", ptr->idx ,ptr->occupancy);
   }
 }
 

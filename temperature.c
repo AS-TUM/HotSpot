@@ -96,8 +96,8 @@ thermal_config_t default_thermal_config(void)
 	strcpy(config.grid_layer_file, NULLFILE);
 	/* output steady state grid temperatures apart from block temperatures */
 	strcpy(config.grid_steady_file, NULLFILE);
-	/* output transient temperatures in the init format */
-	strcpy(config.all_transient_file, NULLFILE);
+	// /* output transient temperatures in the init format */
+	// strcpy(config.all_transient_file, NULLFILE);
 	/*
 	 * mapping mode between block and grid models.
 	 * default: use the temperature of the center
@@ -267,9 +267,9 @@ void thermal_config_add_from_strs(thermal_config_t *config, materials_list_t *ma
 	if ((idx = get_str_index(table, size, "grid_map_mode")) >= 0)
 		if(sscanf(table[idx].value, "%s", config->grid_map_mode) != 1)
 			fatal("invalid format for configuration  parameter grid_map_mode\n");
-	if ((idx = get_str_index(table, size, "all_transient_file")) >= 0)
-		if(sscanf(table[idx].value, "%s", config->all_transient_file) != 1)
-				fatal("invalid format for configuration parameter all_transient_file\n");
+	// if ((idx = get_str_index(table, size, "all_transient_file")) >= 0)
+	// 	if(sscanf(table[idx].value, "%s", config->all_transient_file) != 1)
+	// 			fatal("invalid format for configuration parameter all_transient_file\n");
 
 	if ((config->t_chip <= 0) || (config->s_sink <= 0) || (config->t_sink <= 0) ||
 		(config->s_spreader <= 0) || (config->t_spreader <= 0) ||
@@ -402,7 +402,7 @@ int thermal_config_to_strs(thermal_config_t *config, str_pair *table, int max_en
 	sprintf(table[48].name, "grid_map_mode");
     sprintf(table[49].name, "grid_transient_file");
     sprintf(table[50].name, "detailed_3D_used");
-	sprintf(table[51].name, "all_transient_file");
+	//sprintf(table[51].name, "all_transient_file");
 
 	sprintf(table[0].value, "%lg", config->t_chip);
 	sprintf(table[1].value, "%lg", config->k_chip);
@@ -455,9 +455,9 @@ int thermal_config_to_strs(thermal_config_t *config, str_pair *table, int max_en
 	sprintf(table[48].value, "%s", config->grid_map_mode);
 	sprintf(table[49].value, "%s", config->grid_transient_file);
 	sprintf(table[50].value, "%d", config->detailed_3D_used);
-	sprintf(table[51].value, "%s", config->all_transient_file);
+	//sprintf(table[51].value, "%s", config->all_transient_file);
 
-	return 52;
+	return 51;
 }
 
 /* package parameter routines	*/
@@ -658,79 +658,77 @@ void populate_C_model(RC_model_t *model, flp_t *flp)
 	else fatal("unknown model type\n");
 }
 
-/* steady state temperature	*/
-void steady_state_temp(RC_model_t *model, double *power, double *temp)
-{
-	int leak_convg_true = 0;
-	int leak_iter = 0;
-	int n, base=0;
-	//int idx=0;
-	double blk_height, blk_width;
-	int i, j, k;
+// /* steady state temperature	*/
+// void steady_state_temp(RC_model_t *model, double *power, double *temp)
+// {
+// 	int leak_convg_true = 0;
+// 	int leak_iter = 0;
+// 	int n, base=0;
+// 	//int idx=0;
+// 	double blk_height, blk_width;
+// 	int i, j, k;
 
-	double *d_temp = NULL;
-	double *temp_old = NULL;
-	double *power_new = NULL;
-	double d_max=0.0;
+// 	double *d_temp = NULL;
+// 	double *temp_old = NULL;
+// 	double *power_new = NULL;
+// 	double d_max=0.0;
 
-	if (model->type == BLOCK_MODEL) {
-		fatal("HotSpot was run with block model. Incompatible with ThermSniper toolchain.");
-	}
-	else if (model->type == GRID_MODEL)	{
-		if (model->config->leakage_used) { // if considering leakage-temperature loop
-			d_temp = hotspot_vector(model);
-			temp_old = hotspot_vector(model);
-			power_new = hotspot_vector(model);
-			for (leak_iter=0;(!leak_convg_true)&&(leak_iter<=LEAKAGE_MAX_ITER);leak_iter++){
-				for(k=0, base=0; k < model->grid->n_layers; k++) {
-					printf("steady_state_temp(): LAYER %d:\n", k);
-					if(model->grid->layers[k].has_power)
-						for(j=0; j < model->grid->layers[k].flp->n_units; j++) {
-							printf("floorplan element name: %s\n", model->grid->layers[k].flp->units[j].name);
-							blk_height = model->grid->layers[k].flp->units[j].height;
-							blk_width  = model->grid->layers[k].flp->units[j].width;
-							power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, temp[base+j]);
-							temp_old[base+j] = temp[base+j]; //copy temp before update
-						}
-					base += model->grid->layers[k].flp->n_units;
-				}
-				steady_state_temp_grid(model->grid, power_new, temp);
-				d_max = 0.0;
-				for(k=0, base=0; k < model->grid->n_layers; k++) {
-					if(model->grid->layers[k].has_power)
-						for(j=0; j < model->grid->layers[k].flp->n_units; j++) {
-							d_temp[base+j] = temp[base+j] - temp_old[base+j]; //temperature increase due to leakage
-							if (d_temp[base+j]>d_max)
-								d_max = d_temp[base+j];
-						}
-					base += model->grid->layers[k].flp->n_units;
-				}
-				if (d_max < LEAK_TOL) {// check convergence
-					leak_convg_true = 1;
-				}
-				if (d_max > TEMP_HIGH && leak_iter > 0) {// check to make sure d_max is not "nan" (esp. in natural convection)
-					fatal("temperature is too high, possible thermal runaway. Double-check power inputs and package settings.\n");
-				}
-			}
-			free(d_temp);
-			free(temp_old);
-			free(power_new);
-			/* if no convergence after max number of iterations, thermal runaway */
-			if (!leak_convg_true)
-				fatal("too many iterations before temperature-leakage convergence -- possible thermal runaway\n");
-		} else // if leakage-temperature loop is not considered
-			steady_state_temp_grid(model->grid, power, temp);
-	}
-	else fatal("unknown model type\n");
-}
-
-double *temp_first_time = NULL;
+// 	if (model->type == BLOCK_MODEL) {
+// 		fatal("HotSpot was run with block model. Incompatible with ThermSniper toolchain.");
+// 	}
+// 	else if (model->type == GRID_MODEL)	{
+// 		if (model->config->leakage_used) { // if considering leakage-temperature loop
+// 			d_temp = hotspot_vector(model);
+// 			temp_old = hotspot_vector(model);
+// 			power_new = hotspot_vector(model);
+// 			for (leak_iter=0;(!leak_convg_true)&&(leak_iter<=LEAKAGE_MAX_ITER);leak_iter++){
+// 				for(k=0, base=0; k < model->grid->n_layers; k++) {
+// 					printf("steady_state_temp(): LAYER %d:\n", k);
+// 					if(model->grid->layers[k].has_power)
+// 						for(j=0; j < model->grid->layers[k].flp->n_units; j++) {
+// 							//printf("floorplan element name: %s\n", model->grid->layers[k].flp->units[j].name);
+// 							blk_height = model->grid->layers[k].flp->units[j].height;
+// 							blk_width  = model->grid->layers[k].flp->units[j].width;
+// 							power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, temp[base+j]);
+// 							temp_old[base+j] = temp[base+j]; //copy temp before update
+// 						}
+// 					base += model->grid->layers[k].flp->n_units;
+// 				}
+// 				steady_state_temp_grid(model->grid, power_new, temp);
+// 				d_max = 0.0;
+// 				for(k=0, base=0; k < model->grid->n_layers; k++) {
+// 					if(model->grid->layers[k].has_power)
+// 						for(j=0; j < model->grid->layers[k].flp->n_units; j++) {
+// 							d_temp[base+j] = temp[base+j] - temp_old[base+j]; //temperature increase due to leakage
+// 							if (d_temp[base+j]>d_max)
+// 								d_max = d_temp[base+j];
+// 						}
+// 					base += model->grid->layers[k].flp->n_units;
+// 				}
+// 				if (d_max < LEAK_TOL) {// check convergence
+// 					leak_convg_true = 1;
+// 				}
+// 				if (d_max > TEMP_HIGH && leak_iter > 0) {// check to make sure d_max is not "nan" (esp. in natural convection)
+// 					fatal("temperature is too high, possible thermal runaway. Double-check power inputs and package settings.\n");
+// 				}
+// 			}
+// 			free(d_temp);
+// 			free(temp_old);
+// 			free(power_new);
+// 			/* if no convergence after max number of iterations, thermal runaway */
+// 			if (!leak_convg_true)
+// 				fatal("too many iterations before temperature-leakage convergence -- possible thermal runaway\n");
+// 		} else // if leakage-temperature loop is not considered
+// 			steady_state_temp_grid(model->grid, power, temp);
+// 	}
+// 	else fatal("unknown model type\n");
+// }
 
 /* transient (instantaneous) temperature	*/
-void compute_temp(RC_model_t *model, double *power, double *temp, double *tot_power_dump, double time_elapsed)
+void compute_temp(RC_model_t *model, double *power, int first_invocation, double *tot_power_dump, double time_elapsed)
 {
-	if (model->type == BLOCK_MODEL)
-		compute_temp_block(model->block, power, temp, time_elapsed);
+	if (model->type == BLOCK_MODEL) //TODO: remove whole if statement (also for rest of code) -> prohibit block model..
+		fatal("HotSpot was run with block model. Incompatible with ThermSniper toolchain.\n");
 	else if (model->type == GRID_MODEL)
 	{
 		static int count = 0;
@@ -739,13 +737,6 @@ void compute_temp(RC_model_t *model, double *power, double *temp, double *tot_po
 		double *power_new = hotspot_vector(model);
 		double blk_height, blk_width;
 
-		// Initilize the pointer first. Subsequent calls temp_first_time will hold the value of temperature for the last iteration. 
-		// [FIX]: We might not be able to free the temp_first_time.
-		if (count++ == 0)
-		{
-			temp_first_time = temp;  // temp_first_time will hold the value of temperature for the last iteration. 
-		}
-
 		for(k=0, base=0; k < model->grid->n_layers; k++) 
 		{				
 			if(model->grid->layers[k].has_power)
@@ -753,16 +744,16 @@ void compute_temp(RC_model_t *model, double *power, double *temp, double *tot_po
 				{					
 					blk_height = model->grid->layers[k].flp->units[j].height;
 					blk_width  = model->grid->layers[k].flp->units[j].width;
-					printf("temp[base+j]: %lf\n", temp[base+j]);
 
 					// Consider tuning power of microring resonator groups in TxRx elements of ONoC
 					if (strncmp(model->grid->layers[k].flp->units[j].name, "TxRx", 4) == 0)
 					{
-						power[base+j] += get_ONoC_tuning_pwr(temp_first_time[base+j]); 
+						power[base+j] += get_ONoC_tuning_pwr(model->grid->last_temp[base+j]); 
 					}
+					
 					if (model->config->leakage_used) 
 					{
-						power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, temp_first_time[base+j]);
+						power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, model->grid->last_temp[base+j]);
 					}
 				}
 			base += model->grid->layers[k].flp->n_units;					
@@ -774,9 +765,12 @@ void compute_temp(RC_model_t *model, double *power, double *temp, double *tot_po
 			for (k=0; k < base; k++)
 				tot_power_dump[k] = power_new[k];
 		
-			compute_temp_grid(model->grid, power_new, temp_first_time, time_elapsed);
+			compute_temp_grid(model->grid, power_new, first_invocation, time_elapsed);
 		}
-		else compute_temp_grid(model->grid, power, temp, time_elapsed);	
+		else 
+		{
+			compute_temp_grid(model->grid, power, first_invocation, time_elapsed);	
+		}
 
 		free(power_new);
 	}
