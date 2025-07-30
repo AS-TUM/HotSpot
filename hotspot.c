@@ -771,11 +771,15 @@ int main(int argc, char **argv)
     write_names(tout, names, n);
     if(model->config->leakage_used) write_names(pout_withLeak, names, n);
 
-    if (access(TRANS_TEMP_FILE, F_OK) == 0) {
-        printf("Deleting detected obsolete file: %s\n", TRANS_TEMP_FILE);
-        if (unlink(TRANS_TEMP_FILE) != 0) {
-          fatal("Could not delete old transient temp data file\n");
-        }
+    if (trace_num==0)
+    {
+      if (access(TRANS_TEMP_FILE, F_OK) == 0) 
+      {
+          printf("Warning: Deleting detected obsolete file: %s\n", TRANS_TEMP_FILE);
+          if (unlink(TRANS_TEMP_FILE) != 0) {
+            fatal("Could not delete old transient temp data file\n");
+          }
+      }
     }
   }
   else if(trace_num>0 && do_transient)

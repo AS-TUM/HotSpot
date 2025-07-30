@@ -526,15 +526,33 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
   res = 1.0 / layer->k;   // default layer resistivity
   sh = layer->sp;         // default layer specific heat
 
-  for (i = 0; i < model->rows; i++) {
-      for (j = 0; j < model->cols; j++) {
-          if (!layer->b2gmap[i][j]) {
+  for (i = 0; i < model->rows; i++) 
+  {
+      for (j = 0; j < model->cols; j++) 
+      {
+          // Cell fully covered by (in floorplan unspecified) fillers
+          if (!layer->b2gmap[i][j]) 
+          {
               // Assign dummy unit index, 1 occupancy
               layer->b2gmap[i][j] = new_blist(FILLER_BLIST_IDX, 1.0, res, sh, 0,
                   model->config.detailed_3D_used, cw, ch, layer->thickness);
 
               layer->b2gmap[i][j]->hasRes = FALSE;
               layer->b2gmap[i][j]->hasCap = FALSE;
+          }
+          // Check for cells partially covered by unspecified fillers
+          else
+          { 
+            double total_occupancy=0.0;
+            for(blist_t *ptr=layer->b2gmap[i][j]; ptr; ptr = ptr->next)
+            {
+              total_occupancy += ptr->occupancy;
+            }
+            if(!eq(total_occupancy, 1.0))
+            {
+              printf("Partially unassigned grid cell case occured: Add Filler Blist with occupancy: %lf\n", (1.0-total_occupancy));
+              blist_append(layer->b2gmap[i][j], FILLER_BLIST_IDX, (1.0-total_occupancy),res,sh,0,model->config.detailed_3D_used,cw,ch,layer->thickness);
+            }
           }
       }
   }
