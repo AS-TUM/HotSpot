@@ -93,14 +93,16 @@ void usage(int argc, char **argv)
 // #include <assert.h>
 void load_last_trans_temp_mmap(grid_model_t *model, const char *filename,
                                      void **mapped_region, size_t *mapped_size) {
-    int fd = open(filename, O_RDONLY);
+
+    printf("called load_last_trans_temp_mmap()");
+    int fd = open(filename, O_RDWR);
     if (fd < 0) { perror("open"); exit(1); }
 
     off_t fsize = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
     *mapped_size = (size_t)fsize;
 
-    void *raw = mmap(NULL, fsize, PROT_READ, MAP_PRIVATE, fd, 0);
+    void *raw = mmap(NULL, fsize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (raw == MAP_FAILED) fatal("mmap failed\n");
     *mapped_region = raw;
@@ -139,10 +141,61 @@ void load_last_trans_temp_mmap(grid_model_t *model, const char *filename,
     model->last_trans = v;
 
     // Setup last_temp
-    model->last_temp = last_temp_flat;    
+    model->last_temp = last_temp_flat;   
+    printf("finished load_last_trans_temp_mmap()\n"); 
 }
 
-void unload_last_trans_temp(void *mapped_region, size_t mapped_size) {
+void save_last_trans_temp_mmap(grid_model_t *m, const char *filename, int num_extra) 
+{
+    printf("save_last_trans_temp_mmap() called. Extra nodes: %d\n", num_extra);
+    FILE *f = fopen(filename, "wb");
+    if (!f) { perror("fopen"); exit(1); }
+
+    int header[6] = {
+        MAGIC_MMAP_FILE,
+        trace_num,      
+        m->n_layers,
+        m->rows,
+        m->cols,
+        num_extra
+    };
+    fwrite(header, sizeof(header), 1, f);
+
+    // Write cuboid data
+    for (int l = 0; l < m->n_layers; l++) 
+    {
+        for (int r = 0; r < m->rows; r++) 
+        {
+            fwrite(m->last_trans->cuboid[l][r], sizeof(double), m->cols, f);
+        }
+    }
+    
+    // Write extra nodes data
+    fwrite(m->last_trans->extra, sizeof(double), num_extra, f);
+
+    // Write last_temp
+    size_t total_nodes;
+    if (m->config.model_secondary)
+      total_nodes = m->total_n_blocks + EXTRA + EXTRA_SEC;
+    else
+      total_nodes = m->total_n_blocks + EXTRA;
+    fwrite(m->last_temp, sizeof(double), total_nodes, f);
+
+    fclose(f);
+}
+
+void flush_updated_last_trans_temp(void *mapped_region, size_t mapped_size) 
+{   
+  printf("flush_updated_last_trans_temp() called\n");
+  int *header = (int *)mapped_region;
+  header[1] = trace_num;
+  if (msync(mapped_region, mapped_size, MS_SYNC) != 0) {
+      perror("msync");
+  }
+}
+
+void unload_last_trans_temp(void *mapped_region, size_t mapped_size) 
+{
     munmap(mapped_region, mapped_size);
 }
 
@@ -219,7 +272,7 @@ void global_config_from_strs(global_config_t *config, str_pair *table, int size)
         fatal("invalid format for timestamp\n");
         printf("Timestamp: %d\n", trace_num); //TODO: remove
    } else {
-       trace_num = 0;
+       trace_num = -1; // for HotSpot standalone run
    }
   if ((idx = get_str_index(table, size, "TxRx_alpha")) >= 0) {
       if(sscanf(table[idx].value, "%lf", &alpha_ONoC_MRR) != 1)
@@ -483,8 +536,8 @@ void print_simulation_summary(thermal_config_t thermal_config, RC_model_t *model
 int main(int argc, char **argv)
 {
   int i, j, idx, base = 0, count = 0, n = 0, first_invocation;
-  void *mapped_region;
-  size_t mapped_size;
+  void *mapped_region = NULL;
+  size_t mapped_size = 0;
   int num, size, lines = 0, do_transient = TRUE;
   char **names;
   double *vals;
@@ -671,7 +724,7 @@ int main(int argc, char **argv)
   overall_power = hotspot_vector(model);
 
   /* set up initial instantaneous temperatures if first ThermSniper HotSpot invocation*/
-  if (trace_num==0 ) 
+  if (trace_num<=0)   //trace_num=-1 in HotSpot standalone run
   {
     if (do_transient && strcmp(model->config->init_file, NULLFILE)) {
         if (!model->config->dtm_used)	/* initial T = steady T for no DTM	*/
@@ -712,7 +765,7 @@ int main(int argc, char **argv)
     fatal("no. of units in floorplan and trace file differ\n");
 
   /* header lines of trace files and cleanup of old TRANS_TEMP_FILE */
-  if (trace_num==0 && do_transient)
+  if (trace_num<=0 && do_transient)
   {
     printf("Writing header of trace files\n");
     write_names(tout, names, n);
@@ -725,7 +778,7 @@ int main(int argc, char **argv)
         }
     }
   }
-  else if(trace_num!=0 && do_transient)
+  else if(trace_num>0 && do_transient)
   {
     load_last_trans_temp_mmap(model->grid, TRANS_TEMP_FILE, &mapped_region, &mapped_size);
   }
@@ -762,8 +815,10 @@ int main(int argc, char **argv)
               populate_R_model(model, flp);
           }
 
-          first_invocation = (trace_num==0) && (lines==0);
-          printf("Computing temperatures for t = %e...\n", trace_num*model->config->sampling_intvl);
+          first_invocation = (trace_num<=0) && (lines==0);
+          if(trace_num==-1) printf("Computing temperatures for t = %e...\n", lines*model->config->sampling_intvl); //standalone run
+          else printf("Computing temperatures for t = %e...\n", trace_num*model->config->sampling_intvl);
+
           compute_temp(model, power, first_invocation, power_withLeak, model->config->sampling_intvl);
 
         
@@ -809,6 +864,22 @@ int main(int argc, char **argv)
   }
   if(!lines)
     fatal("no power numbers in trace file\n");
+
+  /* save transient temperature data for next ThermSniper HotSpot invocation */
+  if(trace_num==0)
+  {
+    int extra_nodes;
+    int model_secondary = model->config->model_secondary;
+    if (model_secondary)
+      extra_nodes = EXTRA + EXTRA_SEC;
+    else
+      extra_nodes = EXTRA;
+    save_last_trans_temp_mmap(model->grid, TRANS_TEMP_FILE, extra_nodes); //TODO only call if not standalone run...
+  }
+  else if(trace_num>0)
+  {
+    flush_updated_last_trans_temp(mapped_region, mapped_size);
+  }
 
   /* for computing average	*/
   if (model->type == BLOCK_MODEL)
@@ -879,7 +950,7 @@ int main(int argc, char **argv)
   // dump_temp(model, temp, model->config->all_transient_file);
 
   /* cleanup	*/
-  unload_last_trans_temp(mapped_region, mapped_size); //TODO: check
+  if(trace_num>0) unload_last_trans_temp(mapped_region, mapped_size); //TODO: check
   fclose(pin);
   if (do_transient)
   {
@@ -888,8 +959,6 @@ int main(int argc, char **argv)
   }
   if(!model->grid->has_lcf)
     free_flp(flp, FALSE, FALSE);
-  if (do_transient)
-    free_dvector(model->grid->last_temp);
   delete_RC_model(model);
   free_materials(&materials_list);
   free_microchannel(microchannel_config);

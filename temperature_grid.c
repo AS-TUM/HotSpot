@@ -1258,7 +1258,7 @@ void delete_grid_model(grid_model_t *model)
   }
 
   free_grid_model_vector(model->last_steady);
-  free_grid_model_vector(model->last_trans);
+  if(trace_num<1) free_grid_model_vector(model->last_trans);
   free(model->layers);
   free(model);
 }
@@ -3699,42 +3699,6 @@ void slope_fn_grid(grid_model_t *model, double *v, grid_model_vector_t *p, doubl
 }
 
 
-void save_last_trans_mmap(grid_model_t *m, const char *filename, int num_extra) 
-{
-    printf("save_last_trans_mmap()\n");
-    FILE *f = fopen(filename, "wb");
-    if (!f) { perror("fopen"); exit(1); }
-
-    int header[6] = {
-        MAGIC_MMAP_FILE,
-        trace_num,      
-        m->n_layers,
-        m->rows,
-        m->cols,
-        num_extra
-    };
-    fwrite(header, sizeof(header), 1, f);
-
-    // Write cuboid
-    for (int l = 0; l < m->n_layers; l++)
-        for (int r = 0; r < m->rows; r++)
-            fwrite(m->last_trans->cuboid[l][r], sizeof(double), m->cols, f);
-    
-    // Write extra
-    fwrite(m->last_trans->extra, sizeof(double), num_extra, f);
-
-    printf("write last temp\n");
-    // Write last_temp
-    size_t total_nodes;
-    if (m->config.model_secondary)
-      total_nodes = m->total_n_blocks + EXTRA + EXTRA_SEC;
-    else
-      total_nodes = m->total_n_blocks + EXTRA;
-    fwrite(m->last_temp, sizeof(double), total_nodes, f);
-
-    fclose(f);
-}
-
 void compute_temp_grid(grid_model_t *model, double *power, int first_invocation, double time_elapsed)
 {
   double t, h, new_h;
@@ -3751,11 +3715,17 @@ void compute_temp_grid(grid_model_t *model, double *power, int first_invocation,
 
   p = new_grid_model_vector(model);
 
+  printf("call set_internal_power_grid()\n");
+
   /* package nodes' power numbers	*/
   set_internal_power_grid(model, power);
 
+  printf("call xlate_vector_b2g()\n");
+
   /* map the block power/temp numbers to the grid	*/
   xlate_vector_b2g(model, power, p, V_POWER);
+
+  printf("finished xlate_vector_b2g()\n");
 
   /* if temp is NULL, re-use the temperature from the
    * last call. otherwise, translate afresh and remember
@@ -3764,6 +3734,7 @@ void compute_temp_grid(grid_model_t *model, double *power, int first_invocation,
   if (first_invocation) {
       printf("Call xlate_vector_b2g with V_TEMP\n");
       xlate_vector_b2g(model, model->last_temp, model->last_trans, V_TEMP);
+      printf("Finished xlate_vector_b2g with V_TEMP\n");
   }
 
 #if SUPERLU > 0
@@ -3831,12 +3802,10 @@ void compute_temp_grid(grid_model_t *model, double *power, int first_invocation,
   #endif
 
 #endif
+  printf("call xlate_temp_g2b()\n");
 
   /* map the temperature numbers back	*/
   xlate_temp_g2b(model, model->last_temp, model->last_trans);
-
-  /* save transient temperature data for next ThermSniper HotSpot invocation */
-  save_last_trans_mmap(model, TRANS_TEMP_FILE, extra_nodes);
 
   free_grid_model_vector(p);
 }
