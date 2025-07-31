@@ -943,74 +943,46 @@ void debug_print_model(RC_model_t *model)
 // 	return leakage_power;
 // }
 
-double calc_leakage_core(double h, double w, double temp)   
+/* leakage model must be adjusted to simulated target technology 
+    h,w: height,width in meters, temp: temperature in K, vdd in V */
+double calc_leakage_core(double h, double w, double temp, double vdd)   
 { 
-	/* TODO: Adapt leakage model!!!
-	 * a simple leakage model.
-	 * Be aware -- this model may not be accurate in some cases.
-	 * You may want to use your own temperature-dependent leakage model here.
-	 */
-	double leak_alpha = 1.5e+4;
-	double leak_beta = 0.036;
-	double leak_Tbase = 383.15; /* 110C according to the above paper */
-
-	double leakage_power;
-
-	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
-	return leakage_power;
+	const double alpha_v = 1e-6;
+	const double beta_v = 0.1;
+	const double gamma_v = 2.0;
+	double area_mm2 = h * w * 1e6;
+	return alpha_v * area_mm2 * pow(vdd, gamma_v) * exp(beta_v * (temp - 300.0));
 }
-
+/* leakage model must be adjusted to simulated target technology 
+    h,w: height,width in meters, temp: temperature in K */
 double calc_leakage_L2(double h, double w, double temp)     
 { 
-	/* TODO: Adapt leakage model!!!
-	 * a simple leakage model.
-	 * Be aware -- this model may not be accurate in some cases.
-	 * You may want to use your own temperature-dependent leakage model here.
-	 */
-	double leak_alpha = 1.5e+4;
-	double leak_beta = 0.036;
-	double leak_Tbase = 383.15; /* 110C according to the above paper */
-
-	double leakage_power;
-
-	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
-	return leakage_power;
+	const double alpha_L2 = 1e-6;
+	const double beta_L2 = 0.08;
+	double area_mm2 = h * w * 1e6;
+	return alpha_L2 * area_mm2 * exp(beta_L2 * (temp - 300.0));
 }
-
+/* leakage model must be adjusted to simulated target technology 
+    h,w: height,width in meters, temp: temperature in K */
 double calc_leakage_L3(double h, double w, double temp)     
 { 
-	/* TODO: Adapt leakage model!!!
-	 * a simple leakage model.
-	 * Be aware -- this model may not be accurate in some cases.
-	 * You may want to use your own temperature-dependent leakage model here.
-	 */
-	double leak_alpha = 1.5e+4;
-	double leak_beta = 0.036;
-	double leak_Tbase = 383.15; /* 110C according to the above paper */
-
-	double leakage_power;
-
-	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
-	return leakage_power;
+	const double alpha_L3 = 3e-6; // [W/mm^2] at 300K
+	const double beta_L3 = 0.08;
+	double area_mm2 = h * w * 1e6;
+	return alpha_L3 * area_mm2 * exp(beta_L3 * (temp - 300.0));
 }
-
+/* leakage model must be adjusted to simulated target technology 
+    h,w: height,width in meters, temp: temperature in K */
 double calc_leakage_TxRx(double h, double w, double temp)   
 { 
-	/* TODO: Adapt leakage model!!!
-	 * a simple leakage model.
-	 * Be aware -- this model may not be accurate in some cases.
-	 * You may want to use your own temperature-dependent leakage model here.
-	 */
-	double leak_alpha = 1.5e+4;
-	double leak_beta = 0.036;
-	double leak_Tbase = 383.15; /* 110C according to the above paper */
-
-	double leakage_power;
-
-	leakage_power = leak_alpha*h*w*exp(leak_beta*(temp-leak_Tbase));
-	return leakage_power; 
+	const double area_mm2 = h * w * 1e6;
+	const double base_idle_power = 11.33e-3; // [W] at 300K for ~1mm^2
+	const double scale = base_idle_power / 1.0; // Normalize to 1 mm^2
+	const double beta_txrx = 0.07; // Moderate thermal sensitivity
+	return scale * area_mm2 * exp(beta_txrx * (temp - 300.0));
 }
-
+/* leakage model must be adjusted to simulated target technology 
+    h,w: height,width in meters, temp: temperature in K */
 double get_ONoC_tuning_pwr(double temp)
 {
 	//TODO: Verify
@@ -1048,7 +1020,7 @@ double get_leakage(const char* component_name, int mode, double h, double w, dou
 		num_buf[i] = '\0';
 		unsigned int core_id = atoi(num_buf);
 
-        return ((float) volt[core_id]/10) * calc_leakage_core(h, w, temp);
+        return calc_leakage_core(h, w, temp, ((double) volt[core_id]/10));
 	}
     else if (strncmp(component_name, "L2", 2) == 0)
         return calc_leakage_L2(h, w, temp);
