@@ -550,7 +550,6 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
             }
             if(!eq(total_occupancy, 1.0))
             {
-              printf("Partially unassigned grid cell case occured: Add Filler Blist with occupancy: %lf\n", (1.0-total_occupancy));
               blist_append(layer->b2gmap[i][j], FILLER_BLIST_IDX, (1.0-total_occupancy),res,sh,0,model->config.detailed_3D_used,cw,ch,layer->thickness);
             }
           }
@@ -1408,7 +1407,7 @@ void dump_transient_temp_grid(grid_model_t *model, double sampling_intvl, char *
     fatal(err_message);
   }
 
-  fprintf(grid_transient_fp, "t = %lf\n", trace_num * sampling_intvl);
+  fprintf(grid_transient_fp, "t = %lf\n", (trace_num+1) * sampling_intvl);
   for(int l = 0; l < model->n_layers; l++) {
     fprintf(grid_transient_fp, "Layer %d:\n", l);
     for(int i = 0; i < model->rows; i++) {
