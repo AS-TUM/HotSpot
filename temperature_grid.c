@@ -383,13 +383,7 @@ void set_bgmap(grid_model_t *model, layer_t *layer)
           strncmp(layer->flp->units[u].name, "filler", 6) == 0) 
       {
         filler_component = TRUE;
-        printf("set_bgmap: filler detected: ");
       }
-
-      if(filler_component)//TODO: delete
-      {//TODO: delete
-        printf("Confirmed\n");//TODO: delete
-      } //TODO: delete
 
       /* shortcuts for unit boundaries	*/
       double lu = layer->flp->units[u].leftx;
@@ -3732,26 +3726,18 @@ void compute_temp_grid(grid_model_t *model, double *power, int first_invocation,
 
   p = new_grid_model_vector(model);
 
-  printf("call set_internal_power_grid()\n");
-
   /* package nodes' power numbers	*/
   set_internal_power_grid(model, power);
 
-  printf("call xlate_vector_b2g()\n");
-
   /* map the block power/temp numbers to the grid	*/
   xlate_vector_b2g(model, power, p, V_POWER);
-
-  printf("finished xlate_vector_b2g()\n");
 
   /* if temp is NULL, re-use the temperature from the
    * last call. otherwise, translate afresh and remember
    * the grid and block temperature arrays for future use
    */
   if (first_invocation) {
-      printf("Call xlate_vector_b2g with V_TEMP\n");
       xlate_vector_b2g(model, model->last_temp, model->last_trans, V_TEMP);
-      printf("Finished xlate_vector_b2g with V_TEMP\n");
   }
 
 #if SUPERLU > 0
@@ -3819,7 +3805,6 @@ void compute_temp_grid(grid_model_t *model, double *power, int first_invocation,
   #endif
 
 #endif
-  printf("call xlate_temp_g2b()\n");
 
   /* map the temperature numbers back	*/
   xlate_temp_g2b(model, model->last_temp, model->last_trans);

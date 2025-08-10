@@ -267,9 +267,6 @@ void thermal_config_add_from_strs(thermal_config_t *config, materials_list_t *ma
 	if ((idx = get_str_index(table, size, "grid_map_mode")) >= 0)
 		if(sscanf(table[idx].value, "%s", config->grid_map_mode) != 1)
 			fatal("invalid format for configuration  parameter grid_map_mode\n");
-	// if ((idx = get_str_index(table, size, "all_transient_file")) >= 0)
-	// 	if(sscanf(table[idx].value, "%s", config->all_transient_file) != 1)
-	// 			fatal("invalid format for configuration parameter all_transient_file\n");
 
 	if ((config->t_chip <= 0) || (config->s_sink <= 0) || (config->t_sink <= 0) ||
 		(config->s_spreader <= 0) || (config->t_spreader <= 0) ||
@@ -281,7 +278,7 @@ void thermal_config_add_from_strs(thermal_config_t *config, materials_list_t *ma
 		(config->t_solder <= 0) || (config->r_convec_sec <= 0) || (config->c_convec_sec <= 0))
 		fatal("secondary heat tranfer layer dimensions should be greater than zero\n");
 	/* leakage iteration is not supported in transient mode in this release */
-	if (config->leakage_used == 1) {
+	if (config->leakage_used == 1 && trace_num<=0) {
 		printf("Warning: transient leakage iteration is not supported by HotLeakage in this release. Manual leakage tuning...\n");
 	}
 	if ((config->model_secondary == 1) && (!strcasecmp(config->model_type, BLOCK_MODEL_STR)))
@@ -754,6 +751,7 @@ void compute_temp(RC_model_t *model, double *power, int first_invocation, double
 					if (model->config->leakage_used) 
 					{
 						power_new[base+j] = power[base+j] + get_leakage(model->grid->layers[k].flp->units[j].name, model->config->leakage_mode, blk_height, blk_width, model->grid->last_temp[base+j]);
+						tot_power_dump[base+j] = power_new[base+j];
 					}
 				}
 			base += model->grid->layers[k].flp->n_units;					
@@ -761,9 +759,9 @@ void compute_temp(RC_model_t *model, double *power, int first_invocation, double
 		
 		if (model->config->leakage_used) 
 		{
-			// Assigning power values to the tot_power_dump array for file output (performed in hotspot.c)
-			for (k=0; k < base; k++)
-				tot_power_dump[k] = power_new[k];
+			// // Assigning power values to the tot_power_dump array for file output (performed in hotspot.c)
+			// for (k=0; k < base; k++)
+			// 	tot_power_dump[k] = power_new[k];
 		
 			compute_temp_grid(model->grid, power_new, first_invocation, time_elapsed);
 		}
@@ -984,9 +982,7 @@ double calc_leakage_TxRx(double h, double w, double temp)
 /* leakage model must be adjusted to simulated target technology 
     h,w: height,width in meters, temp: temperature in K */
 double get_ONoC_tuning_pwr(double temp)
-{
-	//TODO: Verify
-	
+{	
 	double therm_mod_ONoC_MRR = fmod(alpha_ONoC_MRR * (temp-Tref_ONoC_MRR), S_ONoC_MRR);
 
 	if (therm_mod_ONoC_MRR < 0) therm_mod_ONoC_MRR += S_ONoC_MRR;  // ensure positive modulo (in case delta T negative)

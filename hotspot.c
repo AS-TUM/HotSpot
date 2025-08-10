@@ -68,6 +68,8 @@
 /*  efficiency.															                              */
 /**************************************************************************/
 
+// TODO: properly handle block model type and file outputting... (e.g. maybe allow standalone HotSpot run with block model..)
+
 void usage(int argc, char **argv)
 {
   fprintf(stdout, "Usage: %s -f <file> -p <file> [-o <file>] [-c <file>] [-d <file>] [-v <volt_vector>] [-t <trace_num (int)>] [-TxRx_alpha <double>] [-TxRx_beta <double>] [-TxRx_Tref <double>] [-TxRx_S <double>] [-TxRx_pvmod <double>] [options]\n", argv[0]);
@@ -90,11 +92,8 @@ void usage(int argc, char **argv)
 
 #include <sys/mman.h>
 #include <fcntl.h> 
-// #include <assert.h>
 void load_last_trans_temp_mmap(grid_model_t *model, const char *filename,
                                      void **mapped_region, size_t *mapped_size) {
-
-    printf("called load_last_trans_temp_mmap()");
     int fd = open(filename, O_RDWR);
     if (fd < 0) { perror("open"); exit(1); }
 
@@ -142,12 +141,10 @@ void load_last_trans_temp_mmap(grid_model_t *model, const char *filename,
 
     // Setup last_temp
     model->last_temp = last_temp_flat;   
-    printf("finished load_last_trans_temp_mmap()\n"); 
 }
 
 void save_last_trans_temp_mmap(grid_model_t *m, const char *filename, int num_extra) 
 {
-    printf("save_last_trans_temp_mmap() called. Extra nodes: %d\n", num_extra);
     FILE *f = fopen(filename, "wb");
     if (!f) { perror("fopen"); exit(1); }
 
@@ -186,7 +183,6 @@ void save_last_trans_temp_mmap(grid_model_t *m, const char *filename, int num_ex
 
 void flush_updated_last_trans_temp(void *mapped_region, size_t mapped_size) 
 {   
-  printf("flush_updated_last_trans_temp() called\n");
   int *header = (int *)mapped_region;
   header[1] = trace_num;
   if (msync(mapped_region, mapped_size, MS_SYNC) != 0) {
@@ -270,42 +266,36 @@ void global_config_from_strs(global_config_t *config, str_pair *table, int size)
   if ((idx = get_str_index(table, size, "t")) >= 0) {
       if(sscanf(table[idx].value, "%d", &trace_num) != 1)
         fatal("invalid format for timestamp\n");
-        printf("Timestamp: %d\n", trace_num); //TODO: remove
    } else {
        trace_num = -1; // for HotSpot standalone run
    }
   if ((idx = get_str_index(table, size, "TxRx_alpha")) >= 0) {
       if(sscanf(table[idx].value, "%lf", &alpha_ONoC_MRR) != 1)
         fatal("invalid format for TxRx_alpha\n");
-        printf("TxRx alpha: %lf\n", alpha_ONoC_MRR); //TODO: remove
    } else { // should only occur if no TxRx in floorplan...
        alpha_ONoC_MRR = 0; 
    }
   if ((idx = get_str_index(table, size, "TxRx_beta")) >= 0) {
       if(sscanf(table[idx].value, "%lf", &beta_ONoC_MRR) != 1)
         fatal("invalid format for TxRx_beta\n");
-        printf("TxRx beta: %lf\n", beta_ONoC_MRR); //TODO: remove
    } else { // should only occur if no TxRx in floorplan...
        beta_ONoC_MRR = 0; 
    }
   if ((idx = get_str_index(table, size, "TxRx_Tref")) >= 0) {
       if(sscanf(table[idx].value, "%lf", &Tref_ONoC_MRR) != 1)
         fatal("invalid format for TxRX_Tref\n");
-        printf("TxRx Tref: %lf\n", Tref_ONoC_MRR); //TODO: remove
    } else { // should only occur if no TxRx in floorplan...
        Tref_ONoC_MRR = 0; 
    }
   if ((idx = get_str_index(table, size, "TxRx_S")) >= 0) {
       if(sscanf(table[idx].value, "%lf", &S_ONoC_MRR) != 1)
         fatal("invalid format for TxRx_S\n");
-        printf("TxRx S: %lf\n", S_ONoC_MRR); //TODO: remove
    } else { // should only occur if no TxRx in floorplan...
        S_ONoC_MRR = 0; 
    }
   if ((idx = get_str_index(table, size, "TxRx_pvmod")) >= 0) {
       if(sscanf(table[idx].value, "%lf", &pvmod_ONoC_MRR) != 1)
         fatal("invalid format for TxRx_pvmod\n");
-        printf("TxRx pvmod: %lf\n", pvmod_ONoC_MRR); //TODO: remove
    } else { // should only occur if no TxRx in floorplan...
        pvmod_ONoC_MRR = 0; 
    }
@@ -555,7 +545,7 @@ int main(int argc, char **argv)
   double total_power = 0.0;
 
   /* steady state temperature and power values	*/
-  double *overall_power, *steady_temp;
+  double *overall_power;
   /* thermal model configuration parameters	*/
   thermal_config_t thermal_config;
   /* default microchannel parameters */
@@ -585,7 +575,7 @@ int main(int argc, char **argv)
   size = parse_cmdline(table, MAX_ENTRIES, argc, argv);
   global_config_from_strs(&global_config, table, size);
 
-  ////////////////////////////////////////////////////tmo//////////////////////////////
+  /* Assemble vector with vdd information of cores */
   int length_v = strlen(volt_vector);
   j = 0;
   for (i = 0; i < length_v; i += 4)
@@ -593,9 +583,6 @@ int main(int argc, char **argv)
       // Convert comma-separated "x.y"s from vdd string (volt_vector) to integers: x * 10 + y
       volt[j++] = 10 * (volt_vector[i] - '0') + (volt_vector[i+2] - '0');
   }
-
-  printf("Simulation trace_num: %d\n", trace_num);
-  ////////////////////////////////////////////////////tmo////////////////////////////// 
 
   /* no transient simulation, only steady state	*/
   if(!strcmp(global_config.t_outfile, NULLFILE))
@@ -719,8 +706,7 @@ int main(int argc, char **argv)
   if (do_transient)
     model->grid->last_temp = hotspot_vector(model);
   power = hotspot_vector(model);
-  power_withLeak = hotspot_vector(model);
-  steady_temp = hotspot_vector(model);
+  power_withLeak = hotspot_vector(model); // TODO: only use if temperature leakage loop active
   overall_power = hotspot_vector(model);
 
   /* set up initial instantaneous temperatures if first ThermSniper HotSpot invocation*/
@@ -750,8 +736,6 @@ int main(int argc, char **argv)
   } else
     fatal("unknown model type\n");
 
-  printf("temp-leakage loop used: %d\n", model->config->leakage_used);
-
   if(!(pin = fopen(global_config.p_infile, "r")))
     fatal("unable to open power trace input file\n");
   if(do_transient && !(tout = fopen(global_config.t_outfile, "a")))
@@ -767,7 +751,7 @@ int main(int argc, char **argv)
   /* header lines of trace files and cleanup of old TRANS_TEMP_FILE */
   if (trace_num<=0 && do_transient)
   {
-    printf("Writing header of trace files\n");
+    printf("Writing header of trace files...\n");
     write_names(tout, names, n);
     if(model->config->leakage_used) write_names(pout_withLeak, names, n);
 
@@ -860,7 +844,10 @@ int main(int argc, char **argv)
         for(i=0, base=0; i < model->grid->n_layers; i++) {
             if(model->grid->layers[i].has_power)
               for(j=0; j < model->grid->layers[i].flp->n_units; j++)
-                overall_power[base+j] += power[base+j];
+              {
+                if(model->config->leakage_used) overall_power[base+j] += power_withLeak[base+j];
+                else overall_power[base+j] += power[base+j];
+              }
             base += model->grid->layers[i].flp->n_units;
         }
 
@@ -878,7 +865,7 @@ int main(int argc, char **argv)
       extra_nodes = EXTRA + EXTRA_SEC;
     else
       extra_nodes = EXTRA;
-    save_last_trans_temp_mmap(model->grid, TRANS_TEMP_FILE, extra_nodes); //TODO only call if not standalone run...
+    save_last_trans_temp_mmap(model->grid, TRANS_TEMP_FILE, extra_nodes); 
   }
   else if(trace_num>0)
   {
@@ -937,24 +924,20 @@ int main(int argc, char **argv)
           fprintf(stdout, "printing temp...\n");
           dump_dvector(temp, model->block->n_nodes);
       }
-      fprintf(stdout, "printing steady_temp...\n");
-      dump_dvector(steady_temp, model->block->n_nodes);
+      // fprintf(stdout, "printing steady_temp...\n");
+      // dump_dvector(steady_temp, model->block->n_nodes);
   } else {
       if (do_transient) {
           fprintf(stdout, "printing temp...\n");
           dump_dvector(temp, model->grid->total_n_blocks + EXTRA);
       }
-      fprintf(stdout, "printing steady_temp...\n");
-      dump_dvector(steady_temp, model->grid->total_n_blocks + EXTRA);
+      // fprintf(stdout, "printing steady_temp...\n");
+      // dump_dvector(steady_temp, model->grid->total_n_blocks + EXTRA);
   }
 #endif
 
-  // fprintf(stdout, "Dumping transient temperatures (for next ThermSniper iteration as .init file) to %s\n", model->config->all_transient_file);
-  // fprintf(stdout, "Unit\tSteady(Kelvin)\n");
-  // dump_temp(model, temp, model->config->all_transient_file);
-
   /* cleanup	*/
-  if(trace_num>0) unload_last_trans_temp(mapped_region, mapped_size); //TODO: check
+  if(trace_num>0) unload_last_trans_temp(mapped_region, mapped_size); 
   fclose(pin);
   if (do_transient)
   {
@@ -967,8 +950,8 @@ int main(int argc, char **argv)
   free_materials(&materials_list);
   free_microchannel(microchannel_config);
   free_dvector(power);
-  free_dvector(steady_temp);
   free_dvector(overall_power);
+  free_dvector(power_withLeak);
   free_names(names);
   free_dvector(vals);
   free_dvector(vals_withLeak);
